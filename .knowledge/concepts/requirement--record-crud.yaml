@@ -1,0 +1,111 @@
+id: requirement:record-crud
+type: requirement
+title: ID-based record operations
+summary: Support insert, update, select by ID, list, and delete without foreign keys.
+lifecycle: accepted
+authority: authored
+aliases:
+- CRUD
+- select
+- ID指定
+- 一覧取得
+assertions:
+- key: operations
+  predicate: required_operations
+  value:
+  - insert
+  - update
+  - get_by_id
+  - list
+  - delete
+  authority: authored
+  basis:
+  - path: docs/requirements-input.md
+    input_hash: fa4903b32f8d00a4eba019ac565db0fc3a9578473d3e858eb8c0da8c7d186a86
+  evidence:
+    input_path: docs/requirements-input.md
+- key: query-scope
+  predicate: query_scope
+  value: ID lookup and collection listing
+  authority: authored
+  basis:
+  - path: docs/requirements-input.md
+    input_hash: fa4903b32f8d00a4eba019ac565db0fc3a9578473d3e858eb8c0da8c7d186a86
+  evidence:
+    locator: 検索範囲の回答
+    input_path: docs/requirements-input.md
+facts:
+  proposed_api:
+  - Insert
+  - Get
+  - List
+  - Update
+  - Delete
+  proposed_container: collection
+  payload_proposal: Opaque bytes with optional codecs or typed wrappers.
+  insert_proposal: Create only when absent; never silently upsert.
+  update_proposal: Replace the value of an existing record while preserving ID.
+  error_candidates:
+  - not_found
+  - already_exists
+  - conflict
+  - unsupported_capability
+  - outcome_unknown
+  implemented_api:
+  - Insert
+  - Get
+  - List
+  - Update
+  - Delete
+  implemented_value: '[]byte; a provisional engineering choice, not a new user requirement.'
+  implemented_container: Collection-bound Store; portable collection names.
+acceptance:
+  operation-coverage:
+    text: Each full-capability driver supports the five record operations.
+    verified_by:
+    - crud-contract
+  lookup-scope:
+    text: Get resolves an ID and List operates within the selected record collection.
+    verified_by:
+    - crud-contract
+verification:
+  crud-contract:
+    state: passed
+    method: integration
+    test: go test -race ./...; see saved implementation-validation report
+    authority: observed
+    basis:
+    - path: store.go
+      input_hash: 46819aea81b5141eba62152d0b5c1160dee0f93fb65eb80c5348c156a061e058
+    - path: id.go
+      input_hash: 706422e1415b75d85b8a153aa765d3ee673a92d8c8b161beee93d2affd668854
+    - path: config.go
+      input_hash: 12b72dfea7406b6f32bfce97a89ab1e80675f308f2dd1c34204c297074e501fa
+    - path: internal/recordstore/store.go
+      input_hash: 1c049b43afb901b820bd12ee4b6a51723b25aaf3a606a73e203f35d6795d86d8
+    - path: internal/conformance/conformance.go
+      input_hash: 3d419ff315c002b499f8dc17f90e894b320592874c0e0d205ccb62fbe11efaf2
+    - path: docs/implementation-validation.md
+      input_hash: ee1e766d12aec0a1161c4d9eb0f8173763fc291ec4111be44d7d2ed538acee1f
+    evidence:
+      input_path: docs/implementation-validation.md
+    scope:
+      environment:
+      - local-db
+      - http-fixture
+open_questions:
+  value-format:
+    text: Use bytes, JSON, generics, or a combination?
+    state: deferred
+    resolution: Initial implementation uses bytes. Revisit typed codecs after usage feedback; no final user approval
+      of the API shape is implied.
+  collection-shape:
+    text: How are collections/namespaces and their names represented?
+    state: deferred
+    resolution: Implemented a collection-bound Store with validated single-component names. Revisit if tenant/hierarchical
+      naming is requested.
+relations:
+- relation: ordered_by
+  to: requirement:creation-order
+- relation: constrained_by
+  to: requirement:concurrent-access

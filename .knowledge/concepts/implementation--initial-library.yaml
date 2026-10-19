@@ -1,0 +1,106 @@
+id: implementation:initial-library
+type: implementation
+title: Initial statically composed Go storage library
+lifecycle: active
+authority: observed
+summary: Common UUIDv7 record API, eleven built-in drivers, HTTP auth, static-import profiles, and locally verified
+  concurrency semantics.
+facts:
+  public_entry_points:
+  - yuruidb.Store
+  - yuruidb.Open
+  - yuruidb.Register
+  - yuruidb.Config
+  - yuruidb.NewID
+  - github.com/shibukawa/yuruidb/adapter
+  drivers:
+  - memory
+  - bbolt
+  - sql
+  - s3
+  - dynamodb
+  - gcs
+  - firestore
+  - firebase
+  - r2
+  - d1
+  - cfkv
+  module_path: github.com/shibukawa/yuruidb
+  report: docs/implementation-validation.md
+  guide: docs/implementation.ja.md
+  unverified:
+  - Live cloud integrations
+  - Real PostgreSQL
+  - Service IAM/rate limits
+  - Performance/size/cold-start benchmarks
+  current_limits:
+  - Ascending ID order only
+  - No page snapshots
+  - Retained tombstones; no physical GC
+  - No durable format migrations
+  - CF KV has no conditional mutation contract
+  - Caller-injected auth for SSO/ADC/federation beyond supplied environment/metadata providers
+relations:
+- relation: implements
+  to: requirement:record-crud
+- relation: implements
+  to: requirement:creation-order
+- relation: implements
+  to: requirement:concurrent-access
+- relation: implements
+  to: requirement:lightweight-drivers
+- relation: implements
+  to: requirement:backend-selection
+verification:
+  local-tests:
+    state: passed
+    method: integration
+    test: go test -race ./...; see saved implementation-validation report
+    authority: observed
+    basis:
+    - path: store.go
+      input_hash: 46819aea81b5141eba62152d0b5c1160dee0f93fb65eb80c5348c156a061e058
+    - path: id.go
+      input_hash: 706422e1415b75d85b8a153aa765d3ee673a92d8c8b161beee93d2affd668854
+    - path: config.go
+      input_hash: 12b72dfea7406b6f32bfce97a89ab1e80675f308f2dd1c34204c297074e501fa
+    - path: internal/recordstore/store.go
+      input_hash: 1c049b43afb901b820bd12ee4b6a51723b25aaf3a606a73e203f35d6795d86d8
+    - path: internal/conformance/conformance.go
+      input_hash: 3d419ff315c002b499f8dc17f90e894b320592874c0e0d205ccb62fbe11efaf2
+    - path: docs/implementation-validation.md
+      input_hash: ee1e766d12aec0a1161c4d9eb0f8173763fc291ec4111be44d7d2ed538acee1f
+    - path: drivers/s3/s3_test.go
+      input_hash: 93d4d62f8cd310c422856f1080e047a14c58210c32a02ca308e524793da5226c
+    - path: drivers/sql/sql_test.go
+      input_hash: 82cef52633f2a0af654240d81a30e1d73ef8a28b2a5d796b3453d929684382bd
+    - path: drivers/d1/d1_test.go
+      input_hash: 06587e7b332052fec319ccb638a09cc0b642658f6e3bc9ba78190a7fd8491b61
+    - path: auth/aws/aws_test.go
+      input_hash: bf8ab31a2215a161f0d70172757eb9b357166a84435d25b3a00d08cffa9331d0
+    evidence:
+      input_path: docs/implementation-validation.md
+  build-profiles:
+    state: passed
+    method: static
+    test: go test -race ./...; see saved implementation-validation report
+    authority: observed
+    basis:
+    - path: scripts/check-builds.py
+      input_hash: 616e685b0406c9bc8bfde7ce1b48cf41addc0f311a3e1efa43ad4f63b7e99c12
+    - path: backends/backends.go
+      input_hash: 28d096d83dc44ea6ac45d8443c5ca3ad3bd0d418a7ce7ea994b8a3e40f0e1a06
+    - path: docs/implementation-validation.md
+      input_hash: ee1e766d12aec0a1161c4d9eb0f8173763fc291ec4111be44d7d2ed538acee1f
+    evidence:
+      input_path: docs/implementation-validation.md
+open_questions:
+  publication:
+    text: Which stable API/data-format version should be published?
+    state: deferred
+    resolution: Module URL is now github.com/shibukawa/yuruidb, matching origin. API/data-format versioning remains
+      deferred until publishing.
+  live-services:
+    text: Which provider/account should receive the first live compatibility run?
+    state: deferred
+    resolution: When a deployment target and credentials are provided; no live compatibility is claimed.

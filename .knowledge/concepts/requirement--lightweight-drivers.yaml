@@ -1,0 +1,68 @@
+id: requirement:lightweight-drivers
+type: requirement
+title: Small optional dependency surface
+summary: Prefer thin HTTP access where feasible and avoid bundling all backend SDKs.
+lifecycle: accepted
+authority: authored
+aliases:
+- HTTP API
+- SDK
+- 軽量
+- バイナリサイズ
+assertions:
+- key: lightweight
+  predicate: dependency_preference
+  value: Thin HTTP API clients when feasible; avoid monolithic SDK bundling
+  authority: authored
+  basis:
+  - path: docs/requirements-input.md
+    input_hash: fa4903b32f8d00a4eba019ac565db0fc3a9578473d3e858eb8c0da8c7d186a86
+  evidence:
+    input_path: docs/requirements-input.md
+facts:
+  hard_vs_preference: HTTP is a preference; the user did not prohibit every SDK dependency.
+  core_proposal: A core module with no cloud SDK or database driver imports.
+  auth_proposal: Inject a signer/credential or token provider, HTTP client, endpoints, and cancellation context.
+  auth_obligations: Signing, credential refresh, retries, and error mapping remain required with HTTP.
+  rdb_boundary: General RDB support may use native database drivers; do not invent a universal HTTP API.
+  measurement_axes:
+  - selected executable size
+  - dependency graph/download size
+  - initialization cost
+  - maintenance burden
+  sdk_alternative: Evaluate selected AWS SDK v2 modules against a handwritten HTTP client rather than assuming a
+    size result.
+  implemented_dependency_boundary: Standard-library-only core and cloud HTTP drivers. Single module currently declares
+    bbolt and test-only SQLite, without any cloud SDK.
+  auth_implementation: Per-request SigV4 credential provider, bearer/query token providers, injected HTTP clients,
+    and optional cached GCP metadata tokens.
+acceptance:
+  dependency-isolation:
+    text: Using the core and one explicitly selected driver does not force import of unrelated backend implementations.
+    verified_by:
+    - dependency-audit
+verification:
+  dependency-audit:
+    state: passed
+    method: static
+    test: go test -race ./...; see saved implementation-validation report
+    authority: observed
+    basis:
+    - path: scripts/check-builds.py
+      input_hash: 616e685b0406c9bc8bfde7ce1b48cf41addc0f311a3e1efa43ad4f63b7e99c12
+    - path: go.mod
+      input_hash: 596696603b70ef5a14c297e68e38f8476bc7127ad57a66cfd5ff6132cab74d33
+    - path: docs/implementation-validation.md
+      input_hash: ee1e766d12aec0a1161c4d9eb0f8173763fc291ec4111be44d7d2ed538acee1f
+    evidence:
+      input_path: docs/implementation-validation.md
+    scope:
+      environment: build
+open_questions:
+  size-budget:
+    text: What numerical size and startup limits matter?
+    state: deferred
+    resolution: Measure at the first remote driver; do not invent an arbitrary budget.
+relations:
+- relation: realized_by
+  to: design:build-composition

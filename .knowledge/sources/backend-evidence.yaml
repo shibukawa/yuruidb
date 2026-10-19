@@ -1,0 +1,15 @@
+id: source:backend-evidence
+title: Manual official-documentation observations and labeled inferences
+adapter: document
+location:
+  root: docs
+  include:
+  - backend-evidence.md
+watch:
+- backend-evidence.md
+depends_on: []
+upstream:
+  kind: web
+  locator: Official provider/toolchain documentation cited in backend-evidence.md
+  refresh_request: Recheck the cited official pages and update the saved notes; local
+    refresh only reimports these notes.

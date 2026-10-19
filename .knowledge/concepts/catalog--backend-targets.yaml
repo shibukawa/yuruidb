@@ -1,0 +1,148 @@
+id: catalog:backend-targets
+type: catalog
+title: Requested backend targets and candidate access paths
+summary: Target inventory; all library adapters are unimplemented and provider facts are documentation-only observations.
+lifecycle: accepted
+authority: authored
+aliases:
+- bbolt
+- DynamoDB
+- RDB
+- S3
+- GCS
+- Firebase
+- R2
+- D1
+- KV
+facts:
+  implementation_status: Eleven built-in drivers implemented; cloud HTTP protocols tested with local fixtures, not
+    live services.
+  targets:
+    bbolt:
+      category: local_kv
+      candidate: Native bbolt transactions and key cursors
+      shared_remote_processes: false
+    dynamodb:
+      category: remote_kv
+      candidate: HTTP conditional writes; collection partition and sortable ID key
+    other-kvs:
+      category: extension
+      candidate: Public Store/Factory registration plus adapter.Backend allow statically imported third-party KVS
+        drivers.
+    rdb:
+      category: sql
+      candidate: database/sql plus per-engine driver and parameterized revision predicates
+    s3:
+      category: object
+      candidate: HTTP conditionals and immutable ID object keys
+      scope: General purpose buckets first
+    gcs:
+      category: object
+      candidate: HTTP generation preconditions
+    firebase:
+      category: document_or_tree
+      candidate: Implemented separate firestore and firebase (Realtime Database) REST drivers; gcp imports both.
+    r2:
+      category: object
+      candidate: S3-compatible HTTP conditionals; separate compatibility checks
+    d1:
+      category: sql
+      candidate: REST SQL for limited traffic or a deployed Worker HTTP gateway
+    cfkv:
+      category: eventual_kv
+      candidate: Implemented reads/list and explicit unconditional Set/Remove; strict mutations return ErrUnsupported.
+  capability_reporting_proposal:
+  - conditional_create
+  - compare_and_swap
+  - conditional_delete
+  - ordered_list
+  - read_consistency
+  - distributed_access
+  - snapshot_pagination
+  provider_vs_adapter: Implemented adapters are locally verified; provider documentation and fixture tests do not
+    establish live compatibility.
+  limits: Record size, throughput, page limits, cost, and authentication remain backend-specific.
+capabilities:
+  bbolt:
+    state: implemented
+    evidence:
+      input_path: docs/implementation-validation.md
+  dynamodb:
+    state: implemented
+    evidence:
+      input_path: docs/implementation-validation.md
+  other-kvs:
+    state: partial
+    evidence:
+      input_path: docs/implementation-validation.md
+  rdb:
+    state: implemented
+    evidence:
+      input_path: docs/implementation-validation.md
+  s3:
+    state: implemented
+    evidence:
+      input_path: docs/implementation-validation.md
+  gcs:
+    state: implemented
+    evidence:
+      input_path: docs/implementation-validation.md
+  firebase:
+    state: implemented
+    evidence:
+      input_path: docs/implementation-validation.md
+  r2:
+    state: implemented
+    evidence:
+      input_path: docs/implementation-validation.md
+  d1:
+    state: implemented
+    evidence:
+      input_path: docs/implementation-validation.md
+  cfkv:
+    state: partial
+    evidence:
+      input_path: docs/implementation-validation.md
+assertions:
+- key: targets
+  predicate: requested_backend_targets
+  value:
+  - bbolt
+  - dynamodb
+  - other-kvs
+  - rdb
+  - object-storage
+  - s3
+  - gcs
+  - firebase
+  - r2
+  - d1
+  - cfkv
+  authority: authored
+  basis:
+  - path: docs/requirements-input.md
+    input_hash: fa4903b32f8d00a4eba019ac565db0fc3a9578473d3e858eb8c0da8c7d186a86
+  evidence:
+    input_path: docs/requirements-input.md
+open_questions:
+  firebase-product:
+    text: Does Firebase mean Firestore, Realtime Database, or both?
+    state: deferred
+    resolution: Implemented both products in separate drivers. No product-selection question blocks using the library.
+  rdb-engines:
+    text: Which SQL engines should have first-party drivers?
+    state: deferred
+    resolution: Implemented SQLite and PostgreSQL dialects over injected database/sql; actual SQLite tested, real
+      PostgreSQL unverified. Additional engines remain deferred.
+  d1-path:
+    text: Use D1 administrative REST directly, a Worker gateway, or both?
+    state: deferred
+    resolution: Direct administrative REST implemented with limits documented; Worker gateway deployment remains
+      outside the library.
+relations:
+- relation: constrained_by
+  to: constraint:cloudflare-kv
+- relation: constrained_by
+  to: constraint:bbolt-processes
+- relation: constrained_by
+  to: constraint:d1-access

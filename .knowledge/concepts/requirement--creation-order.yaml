@@ -1,0 +1,102 @@
+id: requirement:creation-order
+type: requirement
+title: Immutable time-sortable record IDs
+summary: List in creation order using UUIDv7-like keys; updates do not reorder records.
+lifecycle: accepted
+authority: authored
+aliases:
+- UUIDv7
+- 作成順
+- 更新順の修正
+assertions:
+- key: order
+  predicate: required_listing_order
+  value: creation_order
+  authority: authored
+  basis:
+  - path: docs/requirements-input.md
+    input_hash: fa4903b32f8d00a4eba019ac565db0fc3a9578473d3e858eb8c0da8c7d186a86
+  evidence:
+    locator: 並び順の修正
+    input_path: docs/requirements-input.md
+- key: key-family
+  predicate: intended_key_family
+  value: UUIDv7-like time-sortable keys
+  authority: authored
+  basis:
+  - path: docs/requirements-input.md
+    input_hash: fa4903b32f8d00a4eba019ac565db0fc3a9578473d3e858eb8c0da8c7d186a86
+  evidence:
+    locator: 並び順の修正
+    input_path: docs/requirements-input.md
+facts:
+  comparator_proposal: Canonical byte order of immutable record IDs.
+  distributed_boundary: ID timestamp order is not exact cross-process generation or commit order.
+  same_millisecond: Separate processes may generate IDs with equal timestamps and different random suffixes.
+  clock_skew: Generator clocks may differ; strict chronological order is not promised.
+  object_storage_inference: An immutable ID can be the object key, avoiding a mutable update-time index.
+  proposed_first_direction: ascending
+  proposed_pagination: Opaque cursor bound to driver, collection, direction, and last traversed key.
+  pagination_boundary: Concurrent inserts/deletes are not a cross-page snapshot; late IDs before the cursor may
+    be missed.
+  implemented_direction: ascending
+  implemented_id: RFC 9562 UUIDv7; process-local monotonic generation, including clock rollback.
+  implemented_pagination: Opaque base64 keyset cursors; no cross-page snapshot.
+acceptance:
+  fixed-order:
+    text: Update preserves ID and the record position under the ID comparator.
+    verified_by:
+    - id-order
+  ordered-list:
+    text: A page is ordered using the documented ID comparator.
+    verified_by:
+    - id-order
+verification:
+  id-order:
+    state: passed
+    method: integration
+    test: go test -race ./...; see saved implementation-validation report
+    authority: observed
+    basis:
+    - path: store.go
+      input_hash: 46819aea81b5141eba62152d0b5c1160dee0f93fb65eb80c5348c156a061e058
+    - path: id.go
+      input_hash: 706422e1415b75d85b8a153aa765d3ee673a92d8c8b161beee93d2affd668854
+    - path: config.go
+      input_hash: 12b72dfea7406b6f32bfce97a89ab1e80675f308f2dd1c34204c297074e501fa
+    - path: internal/recordstore/store.go
+      input_hash: 1c049b43afb901b820bd12ee4b6a51723b25aaf3a606a73e203f35d6795d86d8
+    - path: internal/conformance/conformance.go
+      input_hash: 3d419ff315c002b499f8dc17f90e894b320592874c0e0d205ccb62fbe11efaf2
+    - path: docs/implementation-validation.md
+      input_hash: ee1e766d12aec0a1161c4d9eb0f8173763fc291ec4111be44d7d2ed538acee1f
+    - path: id_test.go
+      input_hash: f6d13a84ce6ad74769a8c4310fb5ec9ab49961dbd1873351f5ee104a7b883f50
+    evidence:
+      input_path: docs/implementation-validation.md
+    scope:
+      environment:
+      - local-db
+      - http-fixture
+open_questions:
+  uuid-format:
+    text: Require RFC UUIDv7 exactly, and who generates or supplies IDs?
+    state: deferred
+    resolution: Initial implementation generates and requires canonical lowercase RFC UUIDv7 IDs. Callers allocate
+      IDs before insert; revisit on concrete external-ID requirements.
+  direction:
+    text: Must all backends support newest-first, oldest-first, or both?
+    state: deferred
+    resolution: Ascending implemented. Descending is deferred until requested or backed by an explicit storage/listing
+      design.
+  snapshot:
+    text: What consistency is required within and across pages?
+    state: deferred
+    resolution: Live keyset traversal implemented without page snapshots; revisit if an application needs a stable
+      snapshot.
+history:
+  changed-from-update-order:
+    summary: User changed the initial update-order request to creation order with UUIDv7-like keys.
+    evidence:
+      locator: 並び順の修正
+      input_path: docs/requirements-input.md

@@ -1,0 +1,136 @@
+id: requirement:backend-selection
+type: requirement
+title: All backends statically imported; provider tags select import groups
+summary: Every backend is statically imported. Provider build tags enable groups of those same static imports.
+lifecycle: accepted
+authority: authored
+aliases:
+- static import
+- build tags
+- ビルドタグ
+- aws
+- gcp
+- cloudflare
+assertions:
+- key: static-extension
+  predicate: required_extension_path
+  value: All backends are statically imported; additional functionality can be composed through static imports.
+  authority: authored
+  basis:
+  - path: docs/requirements-input.md
+    input_hash: fa4903b32f8d00a4eba019ac565db0fc3a9578473d3e858eb8c0da8c7d186a86
+  evidence:
+    locator: バックエンド組み込み方法の明確化
+    input_path: docs/requirements-input.md
+- key: provider-tags
+  predicate: required_build_selection
+  value:
+  - aws
+  - gcp
+  - cloudflare
+  authority: authored
+  basis:
+  - path: docs/requirements-input.md
+    input_hash: fa4903b32f8d00a4eba019ac565db0fc3a9578473d3e858eb8c0da8c7d186a86
+  evidence:
+    locator: 要件整理と拡張方法の依頼
+    input_path: docs/requirements-input.md
+- key: tag-import-groups
+  predicate: required_tag_mechanism
+  value: Provider build tags enable static import groups for the corresponding backends.
+  authority: authored
+  basis:
+  - path: docs/requirements-input.md
+    input_hash: fa4903b32f8d00a4eba019ac565db0fc3a9578473d3e858eb8c0da8c7d186a86
+  evidence:
+    input_path: docs/requirements-input.md
+    locator: バックエンド組み込み方法の明確化
+facts:
+  accepted_examples:
+    aws:
+    - Lambda
+    - S3
+    - other AWS services
+    gcp:
+    - Cloud Storage
+    - Firebase
+    cloudflare:
+    - R2
+    - D1
+    - KV
+  runtime_vs_storage: Lambda is an execution environment; it is not a data backend.
+  extension_proposal: Implement the common interfaces; statically import drivers using constructors or a registration
+    API whose exact form is deferred.
+  additional_feature_boundary: No particular codec, cache, encryption, or observability extension was explicitly
+    requested.
+  integration_model: All backends use static imports. Direct imports and provider-tag-selected imports compose the
+    same driver packages.
+  implemented_imports: All backends statically imported; optional backends package imports tagged groups.
+  implemented_configuration: Typed driver configs and driver-neutral yuruidb.Config maps work through registered
+    factories.
+  implemented_profiles:
+    aws:
+    - s3
+    - dynamodb
+    gcp:
+    - gcs
+    - firestore
+    - firebase
+    cloudflare:
+    - r2
+    - d1
+    - cfkv
+acceptance:
+  direct-selection:
+    text: A backend can be statically imported individually without any provider tag.
+    verified_by:
+    - build-matrix
+  tag-selection:
+    text: Each provider build tag enables the static import group for that provider, using the same backend packages
+      as individual imports.
+    verified_by:
+    - build-matrix
+verification:
+  build-matrix:
+    state: passed
+    method: static
+    test: go test -race ./...; see saved implementation-validation report
+    authority: observed
+    basis:
+    - path: scripts/check-builds.py
+      input_hash: 616e685b0406c9bc8bfde7ce1b48cf41addc0f311a3e1efa43ad4f63b7e99c12
+    - path: backends/backends.go
+      input_hash: 28d096d83dc44ea6ac45d8443c5ca3ad3bd0d418a7ce7ea994b8a3e40f0e1a06
+    - path: config.go
+      input_hash: 12b72dfea7406b6f32bfce97a89ab1e80675f308f2dd1c34204c297074e501fa
+    - path: examples/basic/main.go
+      input_hash: 209d9b8688c43ee01efe332f774a1b3c1b5c6e4ee834916ea8c24b33a3ffb5b4
+    - path: docs/implementation-validation.md
+      input_hash: ee1e766d12aec0a1161c4d9eb0f8173763fc291ec4111be44d7d2ed538acee1f
+    evidence:
+      input_path: docs/implementation-validation.md
+    scope:
+      environment: build
+open_questions:
+  static-form:
+    text: How should named-import constructors and blank-import registration expose the statically imported drivers?
+    state: deferred
+    resolution: Initial implementation provides named-import constructors and blank-import registration; common
+      config maps avoid forcing direct driver imports in tagged applications.
+  preset-members:
+    text: Which exact drivers/runtime helpers are included by each provider tag?
+    state: deferred
+    resolution: Implemented AWS=S3+DynamoDB, GCP=GCS+Firestore+Realtime Database, Cloudflare=R2+D1+KV. Revisit when
+      adding a backend.
+relations:
+- relation: realized_by
+  to: design:build-composition
+- relation: selects_from
+  to: catalog:backend-targets
+history:
+  static-import-clarified:
+    summary: User clarified that all backends are statically imported and provider tags enable those imports as
+      a group.
+    evidence:
+      input_path: docs/requirements-input.md
+      locator: バックエンド組み込み方法の明確化

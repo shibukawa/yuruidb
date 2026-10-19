@@ -1,0 +1,11 @@
+id: source:go-modules
+title: Declared Go library and test dependencies
+adapter: go-module
+location:
+  root: .
+  selection: filesystem
+  include:
+  - go.mod
+watch:
+- go.mod
+depends_on: []

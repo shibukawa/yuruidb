@@ -1,0 +1,123 @@
+id: design:build-composition
+type: design
+title: Provider-tagged groups of static backend imports
+summary: Provider-tagged Go files statically import the same driver packages available to explicit individual imports;
+  package and registration details remain proposed.
+lifecycle: active
+authority: inferred
+aliases:
+- presets
+- registry
+- go:build
+- go mod tidy
+facts:
+  package_roles:
+    core: Standard-library-only Store, registry, UUIDv7 and config decoding.
+    drivers: Direct typed constructors plus static init registration.
+    composition: backends package with tagged static-import Go files.
+    runtime_helpers: AWS environment credentials and GCP metadata tokens; no Lambda runtime/handler is bundled.
+  registration_rule: If registration is used, register factories only; no network/auth/database opening during init.
+  driver_choice: Tags enable imports; Open selects a linked driver with a typed config or core Config map.
+  unregistered: If registry opening is used, a driver absent from the statically linked registry yields an explicit
+    error.
+  tag_proposals:
+    s3: s3 || aws
+    dynamodb: dynamodb || aws
+    lambda: No driver enabled by lambda alone; lambda,s3 selects s3.
+    gcs: gcs || gcp
+    firebase: firebase || gcp imports RTDB and Firestore; firestore alone imports Firestore only.
+    r2: r2 || cloudflare
+    d1: d1 || cloudflare
+    cfkv: cfkv || cloudflare
+  examples:
+  - aws
+  - gcp
+  - cloudflare
+  - lambda,s3
+  - gcs,r2
+  - aws,gcp,cloudflare
+  composition_semantics: Union of static import groups; avoid duplicate registration if the proposed registry is
+    adopted.
+  tag_boundary: An unconditional application import is unaffected by assembly tags.
+  module_proposal: Separate core, dependency-bearing driver modules, and optional composition module as needed.
+  module_tradeoff: More modules isolate dependency manifests but increase releases and maintenance.
+  tidy_boundary: go mod tidy sees nearly all tags; tags alone do not isolate the module dependency graph.
+  direct_import_tradeoff: Individual static imports minimize the linked set; provider tags activate a convenient
+    group of the same static imports.
+  accepted_integration_model: All backends are statically imported; provider build tags enable groups of those static
+    imports.
+  accepted_vs_proposed: Static linkage and provider-tagged import groups are accepted. Optional package layout,
+    registry design, service tags, and exact preset membership remain proposals.
+  implementation_state: Implemented; public packaging and registration details remain revisable engineering choices.
+  module_implementation: Single module initially; no cloud SDK dependencies. Separate modules remain a possible
+    future packaging change.
+assertions:
+- key: composition
+  predicate: proposed_composition
+  value: Optional composition package of provider-tagged static imports; registration/constructor API remains proposed.
+  authority: inferred
+  basis:
+  - path: docs/requirements-input.md
+    input_hash: fa4903b32f8d00a4eba019ac565db0fc3a9578473d3e858eb8c0da8c7d186a86
+  evidence:
+    input_path: docs/requirements-input.md
+- key: go-tags
+  predicate: observed_go_tag_semantics
+  value: Boolean file constraints; no automatic user-tag implication; tidy includes all tags except ignore
+  authority: observed
+  basis:
+  - path: docs/backend-evidence.md
+    input_hash: 1c531858d40ac13fecaa017de2d0df0132dc0d0adfc8e6d6e37a26e7cb7603b7
+  evidence:
+    locator: Go build constraints and module dependencies
+    input_path: docs/backend-evidence.md
+- key: static-import-model
+  predicate: required_tag_mechanism
+  value: All backends are static imports; provider tags enable groups of those imports.
+  authority: authored
+  basis:
+  - path: docs/requirements-input.md
+    input_hash: fa4903b32f8d00a4eba019ac565db0fc3a9578473d3e858eb8c0da8c7d186a86
+  evidence:
+    input_path: docs/requirements-input.md
+    locator: バックエンド組み込み方法の明確化
+acceptance:
+  core-clean:
+    text: Core imports no backend implementations.
+    verified_by:
+    - tag-builds
+  tag-union:
+    text: Combined provider and service tags statically import each selected driver, without duplicate registration
+      if a registry is used.
+    verified_by:
+    - tag-builds
+  no-side-effects:
+    text: Import and factory registration do not initiate network/auth/storage connections.
+    verified_by:
+    - tag-builds
+verification:
+  tag-builds:
+    state: passed
+    method: static
+    test: go test -race ./...; see saved implementation-validation report
+    authority: observed
+    basis:
+    - path: scripts/check-builds.py
+      input_hash: 616e685b0406c9bc8bfde7ce1b48cf41addc0f311a3e1efa43ad4f63b7e99c12
+    - path: backends/import_s3.go
+      input_hash: fd90beac543376d5b8c411e2a58c144ee5c79e18cdc4907aaa7e56e8c65126fe
+    - path: backends/import_firestore.go
+      input_hash: 02545150292de3a177fb1aa5b0668b25ed09d01f01c741bb1fe8de6c1e18bd54
+    - path: backends/import_firebase.go
+      input_hash: ec3ff1f033105a862158342cc4fed75ca516d6e72989eae3575ce4529ac6fc5c
+    - path: docs/implementation-validation.md
+      input_hash: ee1e766d12aec0a1161c4d9eb0f8173763fc291ec4111be44d7d2ed538acee1f
+    evidence:
+      input_path: docs/implementation-validation.md
+    scope:
+      environment: build
+relations:
+- relation: implements
+  to: requirement:backend-selection
+- relation: constrained_by
+  to: requirement:lightweight-drivers

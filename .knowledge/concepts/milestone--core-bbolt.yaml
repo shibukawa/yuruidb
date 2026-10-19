@@ -1,0 +1,99 @@
+id: milestone:core-bbolt
+type: milestone
+title: Proposed first usable Go storage slice
+summary: Implement the common record contract and a bbolt driver with shared conformance tests before cloud integrations.
+lifecycle: active
+authority: inferred
+facts:
+  outcome: Persistent local CRUD, ID-ordered listing, and revision conflict detection through the common API.
+  recommended_approach: Core contract plus bbolt; keep driver imports outside the core.
+  alternative: Core plus a remote object driver first tests HTTP/auth/CAS earlier but requires provider setup and
+    integration access.
+  tradeoff: bbolt tests persistence and API semantics without cloud credentials, but cannot validate distributed
+    provider behavior.
+  implementation_state: Completed and locally verified; see implementation:initial-library for the broader delivered
+    slice.
+  revisit_triggers:
+  - Finalize API/data-format stability before publication.
+  - Run live provider integration when a target and credentials are selected.
+  - Plan tombstone GC when storage growth requires physical reclamation.
+  completion_scope: Common contract, UUIDv7 IDs, bbolt persistence, conformance and import isolation.
+acceptance:
+  persistent-crud:
+    text: Inserted/updated records survive reopen and deleted records are absent.
+    verified_by:
+    - reopen
+  creation-order:
+    text: Listing follows immutable ID order and update leaves the ordering key unchanged.
+    verified_by:
+    - conformance
+  conditional-write:
+    text: Stale expected revisions cannot update or delete a record.
+    verified_by:
+    - conformance
+  dependency-boundary:
+    text: Core plus bbolt does not import cloud backend implementations.
+    verified_by:
+    - imports
+verification:
+  conformance:
+    state: passed
+    method: integration
+    test: go test -race ./...; see saved implementation-validation report
+    authority: observed
+    basis:
+    - path: store.go
+      input_hash: 46819aea81b5141eba62152d0b5c1160dee0f93fb65eb80c5348c156a061e058
+    - path: id.go
+      input_hash: 706422e1415b75d85b8a153aa765d3ee673a92d8c8b161beee93d2affd668854
+    - path: config.go
+      input_hash: 12b72dfea7406b6f32bfce97a89ab1e80675f308f2dd1c34204c297074e501fa
+    - path: internal/recordstore/store.go
+      input_hash: 1c049b43afb901b820bd12ee4b6a51723b25aaf3a606a73e203f35d6795d86d8
+    - path: internal/conformance/conformance.go
+      input_hash: 3d419ff315c002b499f8dc17f90e894b320592874c0e0d205ccb62fbe11efaf2
+    - path: docs/implementation-validation.md
+      input_hash: ee1e766d12aec0a1161c4d9eb0f8173763fc291ec4111be44d7d2ed538acee1f
+    - path: drivers/bbolt/bbolt.go
+      input_hash: 6ef16bcff8c0bcdfd3c8c89909cb7b3f4f48eae15b39658baf5744806af91557
+    - path: drivers/bbolt/bbolt_test.go
+      input_hash: 663b340be314f6ffd951aa513f39da039449f2b16596883cf0e99856e944fd2f
+    evidence:
+      input_path: docs/implementation-validation.md
+  reopen:
+    state: passed
+    method: integration
+    test: go test -race ./...; see saved implementation-validation report
+    authority: observed
+    basis:
+    - path: drivers/bbolt/bbolt.go
+      input_hash: 6ef16bcff8c0bcdfd3c8c89909cb7b3f4f48eae15b39658baf5744806af91557
+    - path: drivers/bbolt/bbolt_test.go
+      input_hash: 663b340be314f6ffd951aa513f39da039449f2b16596883cf0e99856e944fd2f
+    - path: docs/implementation-validation.md
+      input_hash: ee1e766d12aec0a1161c4d9eb0f8173763fc291ec4111be44d7d2ed538acee1f
+    evidence:
+      input_path: docs/implementation-validation.md
+  imports:
+    state: passed
+    method: static
+    test: go test -race ./...; see saved implementation-validation report
+    authority: observed
+    basis:
+    - path: scripts/check-builds.py
+      input_hash: 616e685b0406c9bc8bfde7ce1b48cf41addc0f311a3e1efa43ad4f63b7e99c12
+    - path: go.mod
+      input_hash: 596696603b70ef5a14c297e68e38f8476bc7127ad57a66cfd5ff6132cab74d33
+    - path: docs/implementation-validation.md
+      input_hash: ee1e766d12aec0a1161c4d9eb0f8173763fc291ec4111be44d7d2ed538acee1f
+    evidence:
+      input_path: docs/implementation-validation.md
+relations:
+- relation: implements
+  to: requirement:record-crud
+- relation: implements
+  to: requirement:creation-order
+- relation: constrained_by
+  to: requirement:concurrent-access
+- relation: constrained_by
+  to: requirement:lightweight-drivers

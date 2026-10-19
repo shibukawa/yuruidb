@@ -1,0 +1,10 @@
+id: source:requirements-input
+title: User requirements from this conversation
+adapter: document
+location:
+  root: docs
+  include:
+  - requirements-input.md
+watch:
+- requirements-input.md
+depends_on: []

@@ -1,0 +1,109 @@
+id: requirement:concurrent-access
+type: requirement
+title: Independent-process remote access
+summary: Support shared remote storage from multiple Lambda-like processes and use optimistic concurrency for object
+  storage.
+lifecycle: accepted
+authority: authored
+aliases:
+- Lambda
+- 楽観ロック
+- CAS
+- 競合制御
+assertions:
+- key: multi-process
+  predicate: required_execution_model
+  value: Multiple independent processes share a remote backend
+  authority: authored
+  basis:
+  - path: docs/requirements-input.md
+    input_hash: fa4903b32f8d00a4eba019ac565db0fc3a9578473d3e858eb8c0da8c7d186a86
+  evidence:
+    input_path: docs/requirements-input.md
+- key: optimistic
+  predicate: intended_object_concurrency
+  value: Optimistic locking or equivalent conditional operations
+  authority: authored
+  basis:
+  - path: docs/requirements-input.md
+    input_hash: fa4903b32f8d00a4eba019ac565db0fc3a9578473d3e858eb8c0da8c7d186a86
+  evidence:
+    input_path: docs/requirements-input.md
+facts:
+  proposed_mutation_contract: Insert-if-absent; Update/Delete carry an opaque expected revision.
+  revision_semantics: Revision changes on mutation and must not permit stale writes after content cycles or ID recreation.
+  revision_vs_id: Revision is an opaque concurrency token, distinct from the immutable creation-order ID.
+  safety_primitive: Atomic conditional operation or transaction on the authoritative backend.
+  forbidden_fallback_proposal: Do not emulate distributed CAS with process-local mutex or unconditional read-then-write.
+  retry_boundary: Do not resolve semantic conflicts by silently replacing the expected revision.
+  unknown_outcome: A timeout after dispatch may mean a mutation committed; retry behavior requires an explicit contract.
+  bbolt_boundary: bbolt serves local persistence, not shared remote multi-process access.
+  implemented_mutations: Expected revisions are mandatory for update/delete; atomic backend conditions guard final
+    writes; new revisions prevent ABA.
+  implemented_deletion: All strict adapters retain revision-bearing tombstones and allow conditional recreation;
+    physical GC is not implemented.
+  implemented_retry: No automatic retries; ambiguous HTTP mutations and database/sql execution failures return ErrOutcomeUnknown
+    conservatively.
+acceptance:
+  concurrent-mutation:
+    text: On a driver advertising safe conditional mutations, concurrent writes using one expected revision cannot
+      both succeed.
+    verified_by:
+    - remote-race
+  missing-capability:
+    text: A configuration requesting conflict-safe mutations fails clearly if the driver cannot provide them.
+    verified_by:
+    - remote-race
+verification:
+  remote-race:
+    state: passed
+    method: integration
+    test: go test -race ./...; see saved implementation-validation report
+    authority: observed
+    basis:
+    - path: store.go
+      input_hash: 46819aea81b5141eba62152d0b5c1160dee0f93fb65eb80c5348c156a061e058
+    - path: id.go
+      input_hash: 706422e1415b75d85b8a153aa765d3ee673a92d8c8b161beee93d2affd668854
+    - path: config.go
+      input_hash: 12b72dfea7406b6f32bfce97a89ab1e80675f308f2dd1c34204c297074e501fa
+    - path: internal/recordstore/store.go
+      input_hash: 1c049b43afb901b820bd12ee4b6a51723b25aaf3a606a73e203f35d6795d86d8
+    - path: internal/conformance/conformance.go
+      input_hash: 3d419ff315c002b499f8dc17f90e894b320592874c0e0d205ccb62fbe11efaf2
+    - path: docs/implementation-validation.md
+      input_hash: ee1e766d12aec0a1161c4d9eb0f8173763fc291ec4111be44d7d2ed538acee1f
+    - path: drivers/s3/s3_test.go
+      input_hash: 93d4d62f8cd310c422856f1080e047a14c58210c32a02ca308e524793da5226c
+    - path: internal/protocoltest/server.go
+      input_hash: 4844fc7af8b052001645f3e64f00e0516f2c04b0573777df24f1008dfd40cf01
+    evidence:
+      input_path: docs/implementation-validation.md
+    scope:
+      environment: http-fixture
+  live-provider-races:
+    state: not_run
+    method: integration
+    scope:
+      environment: live-cloud
+    test: Independent production clients against provisioned cloud resources.
+open_questions:
+  revision-contract:
+    text: Make expected revisions mandatory for all update/delete calls?
+    state: deferred
+    resolution: Implemented mandatory expected revisions. Revisit only on explicit API feedback.
+  delete-aba:
+    text: Choose conditional deletion, tombstones, and ID-reuse rules per backend.
+    state: deferred
+    resolution: Implemented tombstones plus fresh random revisions on every mutation and recreation. Revisit GC
+      before introducing physical reclamation.
+  idempotency:
+    text: How are retries and unknown write outcomes exposed?
+    state: deferred
+    resolution: Implemented caller-assigned IDs, no automatic retries, and explicit unknown-outcome errors. Exactly-once
+      execution is not claimed.
+relations:
+- relation: constrained_by
+  to: constraint:cloudflare-kv
+- relation: constrained_by
+  to: constraint:bbolt-processes

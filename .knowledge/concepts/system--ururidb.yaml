@@ -1,0 +1,261 @@
+id: system:ururidb
+type: system
+title: yuruidb portable Go record storage
+summary: An embeddable Go library for selectable storage backends, ID CRUD, and creation-ordered listing.
+lifecycle: accepted
+authority: authored
+aliases:
+- yuruidb
+- ururidb
+- ストレージライブラリ
+- 要件
+facts:
+  delivery_state: Initial Go library implemented; local DB and local HTTP protocol tests passed. Live cloud services
+    and real PostgreSQL remain unverified.
+  authoritative_inputs:
+  - docs/requirements-input.md
+  human_summary: docs/requirements.ja.md
+  evidence_notes: docs/backend-evidence.md
+  current_milestone: Initial implementation and documented verification completed.
+  validation_report: docs/knowledge-validation.md
+  implementation_guide: docs/implementation.ja.md
+  implementation_report: docs/implementation-validation.md
+  name: yuruidb
+  module_path: github.com/shibukawa/yuruidb
+  repository: https://github.com/shibukawa/yuruidb
+  knowledge_identity: Stable system:ururidb ID is retained across the product rename; use the yuruidb alias for
+    retrieval.
+  readme_languages:
+    English: README.md
+    Japanese: README.ja.md
+  license: Apache-2.0
+assertions:
+- key: product
+  predicate: intended_product
+  value: Go storage library with interchangeable local and remote backends
+  authority: authored
+  basis:
+  - path: docs/requirements-input.md
+    input_hash: fa4903b32f8d00a4eba019ac565db0fc3a9578473d3e858eb8c0da8c7d186a86
+  evidence:
+    input_path: docs/requirements-input.md
+- key: product-name
+  predicate: intended_name
+  value: yuruidb
+  authority: authored
+  basis:
+  - path: docs/requirements-input.md
+    input_hash: fa4903b32f8d00a4eba019ac565db0fc3a9578473d3e858eb8c0da8c7d186a86
+  evidence:
+    input_path: docs/requirements-input.md
+    locator: ライブラリ名とリポジトリ
+- key: module-path
+  predicate: declared_module_path
+  value: github.com/shibukawa/yuruidb
+  authority: observed
+  basis:
+  - path: go.mod
+    input_hash: 596696603b70ef5a14c297e68e38f8476bc7127ad57a66cfd5ff6132cab74d33
+  evidence:
+    input_path: go.mod
+- key: readme-languages
+  predicate: required_readme_languages
+  value:
+    README.md: English
+    README.ja.md: Japanese
+  authority: authored
+  basis:
+  - path: docs/requirements-input.md
+    input_hash: fa4903b32f8d00a4eba019ac565db0fc3a9578473d3e858eb8c0da8c7d186a86
+  evidence:
+    input_path: docs/requirements-input.md
+    locator: 初版の公開とドキュメント・ライセンス
+- key: license
+  predicate: intended_license
+  value: Apache-2.0
+  authority: authored
+  basis:
+  - path: docs/requirements-input.md
+    input_hash: fa4903b32f8d00a4eba019ac565db0fc3a9578473d3e858eb8c0da8c7d186a86
+  evidence:
+    input_path: docs/requirements-input.md
+    locator: 初版の公開とドキュメント・ライセンス
+relations:
+- relation: requires
+  to: requirement:record-crud
+- relation: requires
+  to: requirement:creation-order
+- relation: requires
+  to: requirement:concurrent-access
+- relation: requires
+  to: requirement:lightweight-drivers
+- relation: requires
+  to: requirement:backend-selection
+- relation: targets
+  to: catalog:backend-targets
+- relation: delivered_slice
+  to: milestone:core-bbolt
+- relation: has_implementation
+  to: implementation:initial-library
+non_goals:
+- Foreign-key relationship management in the initial common API.
+- Arbitrary field queries in the initial common API.
+verification:
+  knowledge-catalog:
+    state: passed
+    method: static
+    test: knowledge-memory compile, doctor, sources --check, issues --check, and bounded retrieval checks
+    authority: observed
+    evidence:
+      input_path: docs/knowledge-validation.md
+      locator: 要件メモリの検証記録
+    basis:
+    - path: docs/knowledge-validation.md
+      input_hash: d402bd8c86f8618f057f71144c0e91ac2997a93955aa89eee6c5bce3739ba25c
+  initial-library:
+    state: passed
+    method: integration
+    test: go test -race ./...; see saved implementation-validation report
+    authority: observed
+    basis:
+    - path: adapter/adapter.go
+      input_hash: b2ec2d965b28fe96bcd1ce03af1a3b2bfa0b7f4679e9fd6aacf51117e6bae63e
+    - path: auth/auth.go
+      input_hash: e76ff2a96dfa21a6115602e7cadce14a2c3f086f1a75e4c1c8d7fbf7f37c3f51
+    - path: auth/aws/aws.go
+      input_hash: d44269135ca9006c95abcec124e48d4486889d9338ceee555cea1533fe8b4953
+    - path: auth/aws/aws_test.go
+      input_hash: bf8ab31a2215a161f0d70172757eb9b357166a84435d25b3a00d08cffa9331d0
+    - path: auth/gcp/metadata.go
+      input_hash: 6488fdd09b8a3855efdff610a204223f47823e59e83555cab7c75925e0ae439b
+    - path: auth/gcp/metadata_test.go
+      input_hash: dc53b571fd1283e8f97aeec85ca36eb233e8b37eb8819ae0733ecbbd6fa313ac
+    - path: backends/backends.go
+      input_hash: 28d096d83dc44ea6ac45d8443c5ca3ad3bd0d418a7ce7ea994b8a3e40f0e1a06
+    - path: backends/import_bbolt.go
+      input_hash: a2ab15b88645d568ba17071de6b9871cf0b0d59957a7440459e3ba74a10b733a
+    - path: backends/import_cfkv.go
+      input_hash: 0b671dbeb603a6d3072408897c015cf2a777e1bc003d3d6702c3a907c30542df
+    - path: backends/import_d1.go
+      input_hash: dc3e78eff5ca42d13013a16d65ef81f2e063ce318624e5026bceda12a80312f0
+    - path: backends/import_dynamodb.go
+      input_hash: 350a94a12f5c2ee79164a391b9ed19b2f90b713842cd47d18c4916100f756ad6
+    - path: backends/import_firebase.go
+      input_hash: ec3ff1f033105a862158342cc4fed75ca516d6e72989eae3575ce4529ac6fc5c
+    - path: backends/import_firestore.go
+      input_hash: 02545150292de3a177fb1aa5b0668b25ed09d01f01c741bb1fe8de6c1e18bd54
+    - path: backends/import_gcs.go
+      input_hash: 53c432843e1e883f916d9aa8de854f9d50eec7b7961ab43c0c8869e8a3c67158
+    - path: backends/import_memory.go
+      input_hash: 2af1cedb0455353362399c246c1a32244f6d0b0e00105406549988718721c1ae
+    - path: backends/import_r2.go
+      input_hash: eb06d6f6a39e3025a0bbf5888f48291d780129d29d0734de4f75ce47a6b68398
+    - path: backends/import_s3.go
+      input_hash: fd90beac543376d5b8c411e2a58c144ee5c79e18cdc4907aaa7e56e8c65126fe
+    - path: backends/import_sql.go
+      input_hash: b1b075ab1830013b6fa7e4a4626cb4f7b2d2859c3af6a69d3ea1199a81c40990
+    - path: config.go
+      input_hash: 12b72dfea7406b6f32bfce97a89ab1e80675f308f2dd1c34204c297074e501fa
+    - path: config_test.go
+      input_hash: e7c862bc0777951a96963efd0f180568ec0b7ec803e8c4e7e7943e1cd7a298c9
+    - path: drivers/bbolt/bbolt.go
+      input_hash: 6ef16bcff8c0bcdfd3c8c89909cb7b3f4f48eae15b39658baf5744806af91557
+    - path: drivers/bbolt/bbolt_test.go
+      input_hash: 663b340be314f6ffd951aa513f39da039449f2b16596883cf0e99856e944fd2f
+    - path: drivers/cfkv/cfkv.go
+      input_hash: 4540532c96c14f1b1c7d4ce2ff53f1976550cdd6a59b482e758c51078bcc5fb3
+    - path: drivers/cfkv/cfkv_test.go
+      input_hash: e6acfb258e620ee7fa5801c0fb569c9afe437fc7a3629c969e9ee26b67674de3
+    - path: drivers/d1/d1.go
+      input_hash: 8f05a9454c4a9f7661ebb042776fc7d388e692b870bed3eb73f4cccfd7dd6cd2
+    - path: drivers/d1/d1_test.go
+      input_hash: 06587e7b332052fec319ccb638a09cc0b642658f6e3bc9ba78190a7fd8491b61
+    - path: drivers/dynamodb/dynamodb.go
+      input_hash: 0c0f06a593e6a5cdba7ebcaa6e23a7b5cd102c2ca36efa2d78d6e76d983dd9bf
+    - path: drivers/dynamodb/dynamodb_test.go
+      input_hash: e2a61110d768345bb0985737d4c73a6d728940c0bc9d617777f87498e9235428
+    - path: drivers/firebase/firebase.go
+      input_hash: 9bdfeb08683f0d6243f41dbc56604e9e8714dd3509a8d325460ec92258ce89d8
+    - path: drivers/firebase/firebase_test.go
+      input_hash: 831847619a99b1bfcde8fd92779202c1750aafe87bcf166d64bd7b8118f21d7b
+    - path: drivers/firestore/firestore.go
+      input_hash: afa6cea914b52f6d60845bdffdc5a529de6b19a4e4fcbe51b29766e0c674981e
+    - path: drivers/firestore/firestore_test.go
+      input_hash: db0602d4e8eaff2a7ea00a6aec8f12af20a8d6fe5d96e513a609698f3479bbd7
+    - path: drivers/gcs/gcs.go
+      input_hash: 4a4dbd707bf9bac5e585b5411f2f01c1f8240eacd2eebc09fb88144b63582243
+    - path: drivers/gcs/gcs_test.go
+      input_hash: 376247cfc1da8c25847665ddfd13530c2ccae5149d70d54135e9ffeeab484f8f
+    - path: drivers/memory/memory.go
+      input_hash: 07462d22e85083bb0dfe633bfbb023c6c3dbb21720c52e5174c1ebc62ee96593
+    - path: drivers/memory/memory_test.go
+      input_hash: ee3bf8bf24ea8a5785f0879474dbbdea64426e5ddf0a8c18f0ebdcfef3bde856
+    - path: drivers/r2/r2.go
+      input_hash: 06d2ce8ca3565154cdf7ae00ee7c8a354000d7ea7b469abb2e123ebb78d3923b
+    - path: drivers/r2/r2_test.go
+      input_hash: 0c421d551025d7d32147387e1d0280c80591ebb4e538da62468ea76410e20b89
+    - path: drivers/s3/s3.go
+      input_hash: 12bcdf04a80cc2ad9e5199dd4c8e709fce362179d81538a4442dd0aa54522f38
+    - path: drivers/s3/s3_test.go
+      input_hash: 93d4d62f8cd310c422856f1080e047a14c58210c32a02ca308e524793da5226c
+    - path: drivers/sql/sql.go
+      input_hash: b8876841564dea1f00cbfb31b5c21de23c764be3a1fae97c6737f8600bc9ab02
+    - path: drivers/sql/sql_test.go
+      input_hash: 82cef52633f2a0af654240d81a30e1d73ef8a28b2a5d796b3453d929684382bd
+    - path: examples/basic/main.go
+      input_hash: 209d9b8688c43ee01efe332f774a1b3c1b5c6e4ee834916ea8c24b33a3ffb5b4
+    - path: examples/drivers/main.go
+      input_hash: 21e149802a374a06f20b4cf2d91bb925e88d1f91e9af0d67c54fab3e6496dabc
+    - path: id.go
+      input_hash: 706422e1415b75d85b8a153aa765d3ee673a92d8c8b161beee93d2affd668854
+    - path: id_test.go
+      input_hash: f6d13a84ce6ad74769a8c4310fb5ec9ab49961dbd1873351f5ee104a7b883f50
+    - path: internal/conformance/conformance.go
+      input_hash: 3d419ff315c002b499f8dc17f90e894b320592874c0e0d205ccb62fbe11efaf2
+    - path: internal/httpx/http.go
+      input_hash: cb80a30478a0b530ecc611fac720273290503091339804cd003d9400625f28bf
+    - path: internal/httpx/http_test.go
+      input_hash: 5db0867a4156bda035c532dce6c8caf62a5c543d3a32c5ad02df884164d754fd
+    - path: internal/protocoltest/server.go
+      input_hash: 4844fc7af8b052001645f3e64f00e0516f2c04b0573777df24f1008dfd40cf01
+    - path: internal/recordstore/store.go
+      input_hash: 1c049b43afb901b820bd12ee4b6a51723b25aaf3a606a73e203f35d6795d86d8
+    - path: internal/s3api/s3.go
+      input_hash: c70274e090120b58d9ba5bbb14773af51b1cb6fb63c3371384aba796edaf5222
+    - path: internal/sqlstore/sql.go
+      input_hash: dc0b44e4f025b0c71a6cd52c19aafa3cb7c6eded6e98f7c933a3fd5788205ed8
+    - path: store.go
+      input_hash: 46819aea81b5141eba62152d0b5c1160dee0f93fb65eb80c5348c156a061e058
+    - path: go.mod
+      input_hash: 596696603b70ef5a14c297e68e38f8476bc7127ad57a66cfd5ff6132cab74d33
+    - path: go.sum
+      input_hash: 2a17e304feaa269ee89a2370384b7752b06c8659f53252eea011f83305ef7392
+    - path: scripts/check-builds.py
+      input_hash: 616e685b0406c9bc8bfde7ce1b48cf41addc0f311a3e1efa43ad4f63b7e99c12
+    - path: docs/implementation-validation.md
+      input_hash: ee1e766d12aec0a1161c4d9eb0f8173763fc291ec4111be44d7d2ed538acee1f
+    evidence:
+      input_path: docs/implementation-validation.md
+    scope:
+      environment:
+      - local-db
+      - http-fixture
+      - build
+  documentation-license:
+    state: passed
+    method: static
+    test: Review English/Japanese README parity and local links; inspect the official Apache-2.0 LICENSE text.
+    authority: observed
+    basis:
+    - path: README.md
+      input_hash: c33cf917de58fe6e38103bb2f188db3178bf8ce408ad81cc2273fe58f36ad09d
+    - path: README.ja.md
+      input_hash: 54d8543720cfc0f1c3b618875b38bb7473906e2661fb435c01462e362d565c15
+    - path: LICENSE
+      input_hash: cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30
+history:
+  renamed-yuruidb:
+    summary: User named the library yuruidb. The module path follows the configured origin, github.com/shibukawa/yuruidb.
+    evidence:
+      input_path: docs/requirements-input.md
+      locator: ライブラリ名とリポジトリ

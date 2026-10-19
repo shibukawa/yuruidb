@@ -1,0 +1,28 @@
+id: constraint:d1-access
+type: constraint
+title: D1 REST is an administrative access surface
+summary: D1 supports SQL over REST but Cloudflare recommends a Worker API proxy for application traffic.
+lifecycle: active
+authority: observed
+assertions:
+- key: d1-rest
+  predicate: documented_rest_boundary
+  value: Administrative REST SQL endpoint with global API rate limits; Worker gateway documented for application
+    use.
+  authority: observed
+  basis:
+  - path: docs/backend-evidence.md
+    input_hash: 1c531858d40ac13fecaa017de2d0df0132dc0d0adfc8e6d6e37a26e7cb7603b7
+  evidence:
+    locator: Cloudflare D1 access path
+    input_path: docs/backend-evidence.md
+facts:
+  source_urls:
+  - https://developers.cloudflare.com/api/resources/d1/subresources/database/methods/query/
+  - https://developers.cloudflare.com/d1/tutorials/build-an-api-to-access-d1/
+  inferred_implementation: Offer direct REST only with explicit limits; treat a Worker gateway as an optional external
+    component.
+  runtime_boundary: A Go cloudflare build tag neither deploys a Worker nor establishes native Go execution inside
+    Workers.
+  verification_boundary: REST wire behavior plus conditional SQLite mutations tested via a local HTTP fixture; no
+    live D1 rate-limit or deployment test.

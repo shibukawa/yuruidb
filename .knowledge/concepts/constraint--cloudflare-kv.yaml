@@ -1,0 +1,38 @@
+id: constraint:cloudflare-kv
+type: constraint
+title: Cloudflare KV native concurrency limits
+summary: Native KV writes and eventual reads cannot supply the proposed conflict-safe distributed record contract
+  alone.
+lifecycle: active
+authority: observed
+aliases:
+- Workers KV
+- eventual consistency
+- CASなし
+assertions:
+- key: native-kv
+  predicate: documented_concurrency
+  value: Eventually visible reads and last-writer-wins competing writes; no documented native CAS contract.
+  authority: observed
+  basis:
+  - path: docs/backend-evidence.md
+    input_hash: 1c531858d40ac13fecaa017de2d0df0132dc0d0adfc8e6d6e37a26e7cb7603b7
+  evidence:
+    locator: Cloudflare KV concurrency
+    input_path: docs/backend-evidence.md
+facts:
+  source_url: https://developers.cloudflare.com/kv/api/write-key-value-pairs/#concurrent-writes-to-the-same-key
+  remote_freshness: Unknown after manual documentation check; no live integration.
+  inferred_options:
+  - Explicit basic/relaxed capability adapter
+  - External authoritative coordinator with a separate deployment contract
+  coordination_boundary: Serializing writers does not make global KV reads strongly consistent.
+  safety_proposal: Reject conflict-safe configurations without the required primitive rather than silently degrade.
+  implemented_boundary: cfkv reports no CAS or strong reads; strict mutations return ErrUnsupported; explicit Set/Remove
+    are unconditional.
+open_questions:
+  kv-scope:
+    text: Which reduced guarantees or external coordinator are acceptable for KV?
+    state: deferred
+    resolution: Initial driver deliberately exposes limited capabilities and explicit unconditional methods. External
+      coordination is deferred.
