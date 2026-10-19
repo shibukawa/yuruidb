@@ -75,8 +75,8 @@ func Decode(data []byte, id string) (Envelope, error) {
 	}
 	return e, nil
 }
-func record(e Envelope) yuruidb.Record {
-	return yuruidb.Record{ID: e.ID, Value: append([]byte(nil), e.Value...), Revision: e.Revision}
+func record(e Envelope) yuruidb.RawRecord {
+	return yuruidb.RawRecord{ID: e.ID, Value: append([]byte(nil), e.Value...), Revision: e.Revision}
 }
 func (s *Store) read(ctx context.Context, id string) (Envelope, string, error) {
 	if s.closed.Load() {
@@ -95,85 +95,85 @@ func (s *Store) read(ctx context.Context, id string) (Envelope, string, error) {
 	e, err := Decode(item.Data, id)
 	return e, item.Token, err
 }
-func (s *Store) Get(ctx context.Context, id string) (yuruidb.Record, error) {
+func (s *Store) Get(ctx context.Context, id string) (yuruidb.RawRecord, error) {
 	e, _, err := s.read(ctx, id)
 	if err == nil && e.Deleted {
 		err = yuruidb.ErrNotFound
 	}
 	if err != nil {
-		return yuruidb.Record{}, err
+		return yuruidb.RawRecord{}, err
 	}
 	return record(e), nil
 }
-func (s *Store) Insert(ctx context.Context, id string, value []byte) (yuruidb.Record, error) {
+func (s *Store) Insert(ctx context.Context, id string, value []byte) (yuruidb.RawRecord, error) {
 	if !s.caps.ConditionalMutations {
-		return yuruidb.Record{}, yuruidb.ErrUnsupported
+		return yuruidb.RawRecord{}, yuruidb.ErrUnsupported
 	}
 	if err := yuruidb.ValidateID(id); err != nil {
-		return yuruidb.Record{}, err
+		return yuruidb.RawRecord{}, err
 	}
 	old, token, err := s.read(ctx, id)
 	if err == nil && !old.Deleted {
-		return yuruidb.Record{}, yuruidb.ErrAlreadyExists
+		return yuruidb.RawRecord{}, yuruidb.ErrAlreadyExists
 	}
 	if err != nil && !errors.Is(err, yuruidb.ErrNotFound) {
-		return yuruidb.Record{}, err
+		return yuruidb.RawRecord{}, err
 	}
 	if errors.Is(err, yuruidb.ErrNotFound) {
 		token = ""
 	}
 	rev, err := yuruidb.NewRevision()
 	if err != nil {
-		return yuruidb.Record{}, err
+		return yuruidb.RawRecord{}, err
 	}
 	e := Envelope{ID: id, Value: value, Revision: rev}
 	b, err := json.Marshal(e)
 	if err != nil {
-		return yuruidb.Record{}, err
+		return yuruidb.RawRecord{}, err
 	}
 	if err = s.transport.Write(ctx, s.prefix+id, b, token); err != nil {
 		if errors.Is(err, yuruidb.ErrConflict) {
 			err = yuruidb.ErrAlreadyExists
 		}
-		return yuruidb.Record{}, err
+		return yuruidb.RawRecord{}, err
 	}
 	return record(e), nil
 }
-func (s *Store) mutate(ctx context.Context, id string, value []byte, expected string, deleted bool) (yuruidb.Record, error) {
+func (s *Store) mutate(ctx context.Context, id string, value []byte, expected string, deleted bool) (yuruidb.RawRecord, error) {
 	if !s.caps.ConditionalMutations {
-		return yuruidb.Record{}, yuruidb.ErrUnsupported
+		return yuruidb.RawRecord{}, yuruidb.ErrUnsupported
 	}
 	if expected == "" {
-		return yuruidb.Record{}, fmt.Errorf("%w: expected revision required", yuruidb.ErrInvalid)
+		return yuruidb.RawRecord{}, fmt.Errorf("%w: expected revision required", yuruidb.ErrInvalid)
 	}
 	old, token, err := s.read(ctx, id)
 	if err != nil {
-		return yuruidb.Record{}, err
+		return yuruidb.RawRecord{}, err
 	}
 	if old.Deleted {
-		return yuruidb.Record{}, yuruidb.ErrNotFound
+		return yuruidb.RawRecord{}, yuruidb.ErrNotFound
 	}
 	if old.Revision != expected {
-		return yuruidb.Record{}, yuruidb.ErrConflict
+		return yuruidb.RawRecord{}, yuruidb.ErrConflict
 	}
 	if token == "" {
-		return yuruidb.Record{}, fmt.Errorf("yuruidb: backend omitted concurrency token")
+		return yuruidb.RawRecord{}, fmt.Errorf("yuruidb: backend omitted concurrency token")
 	}
 	rev, err := yuruidb.NewRevision()
 	if err != nil {
-		return yuruidb.Record{}, err
+		return yuruidb.RawRecord{}, err
 	}
 	e := Envelope{ID: id, Value: value, Revision: rev, Deleted: deleted}
 	b, err := json.Marshal(e)
 	if err != nil {
-		return yuruidb.Record{}, err
+		return yuruidb.RawRecord{}, err
 	}
 	if err = s.transport.Write(ctx, s.prefix+id, b, token); err != nil {
-		return yuruidb.Record{}, err
+		return yuruidb.RawRecord{}, err
 	}
 	return record(e), nil
 }
-func (s *Store) Update(ctx context.Context, id string, value []byte, revision string) (yuruidb.Record, error) {
+func (s *Store) Update(ctx context.Context, id string, value []byte, revision string) (yuruidb.RawRecord, error) {
 	return s.mutate(ctx, id, value, revision, false)
 }
 func (s *Store) Delete(ctx context.Context, id, revision string) error {
@@ -186,53 +186,53 @@ type cursor struct {
 	After string `json:"a"`
 }
 
-func (s *Store) List(ctx context.Context, opts yuruidb.ListOptions) (yuruidb.Page, error) {
+func (s *Store) List(ctx context.Context, opts yuruidb.ListOptions) (yuruidb.RawPage, error) {
 	if s.closed.Load() {
-		return yuruidb.Page{}, yuruidb.ErrClosed
+		return yuruidb.RawPage{}, yuruidb.ErrClosed
 	}
 	limit := opts.Limit
 	if limit == 0 {
 		limit = 100
 	}
 	if limit < 1 || limit > 1000 {
-		return yuruidb.Page{}, fmt.Errorf("%w: limit must be 1..1000", yuruidb.ErrInvalid)
+		return yuruidb.RawPage{}, fmt.Errorf("%w: limit must be 1..1000", yuruidb.ErrInvalid)
 	}
 	after := ""
 	if opts.Cursor != "" {
 		b, err := base64.RawURLEncoding.DecodeString(opts.Cursor)
 		var c cursor
 		if err != nil || json.Unmarshal(b, &c) != nil || c.Scope != s.scope || !strings.HasPrefix(c.After, s.prefix) || yuruidb.ValidateID(strings.TrimPrefix(c.After, s.prefix)) != nil {
-			return yuruidb.Page{}, fmt.Errorf("%w: cursor does not belong to this store", yuruidb.ErrInvalid)
+			return yuruidb.RawPage{}, fmt.Errorf("%w: cursor does not belong to this store", yuruidb.ErrInvalid)
 		}
 		after = c.After
 	}
-	page := yuruidb.Page{Records: make([]yuruidb.Record, 0, limit)}
+	page := yuruidb.RawPage{Records: make([]yuruidb.RawRecord, 0, limit)}
 	for {
 		if err := ctx.Err(); err != nil {
-			return yuruidb.Page{}, err
+			return yuruidb.RawPage{}, err
 		}
 		keys, more, err := s.transport.Keys(ctx, after, limit+1)
 		if err != nil {
-			return yuruidb.Page{}, err
+			return yuruidb.RawPage{}, err
 		}
 		if len(keys) == 0 {
 			if more {
-				return yuruidb.Page{}, fmt.Errorf("yuruidb: non-progressing backend listing")
+				return yuruidb.RawPage{}, fmt.Errorf("yuruidb: non-progressing backend listing")
 			}
 			return page, nil
 		}
 		for i, key := range keys {
 			if !strings.HasPrefix(key, s.prefix) || key <= after {
-				return yuruidb.Page{}, fmt.Errorf("yuruidb: invalid backend key ordering")
+				return yuruidb.RawPage{}, fmt.Errorf("yuruidb: invalid backend key ordering")
 			}
 			after = key
 			id := strings.TrimPrefix(key, s.prefix)
 			if err := yuruidb.ValidateID(id); err != nil {
-				return yuruidb.Page{}, fmt.Errorf("yuruidb: foreign key in collection: %w", err)
+				return yuruidb.RawPage{}, fmt.Errorf("yuruidb: foreign key in collection: %w", err)
 			}
 			r, err := s.Get(ctx, id)
 			if err != nil && !errors.Is(err, yuruidb.ErrNotFound) {
-				return yuruidb.Page{}, err
+				return yuruidb.RawPage{}, err
 			}
 			if err == nil {
 				page.Records = append(page.Records, r)

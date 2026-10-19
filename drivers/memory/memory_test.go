@@ -9,8 +9,8 @@ import (
 )
 
 func TestConformance(t *testing.T) {
-	conformance.Run(t, func(t *testing.T) (yuruidb.Store, yuruidb.Store) {
-		s, err := memory.Open(context.Background(), memory.Config{Collection: "items"})
+	conformance.Run(t, func(t *testing.T) (yuruidb.RawStore, yuruidb.RawStore) {
+		s, err := memory.OpenRaw(context.Background(), memory.Config{Collection: "items"})
 		if err != nil {
 			t.Fatal(err)
 		}

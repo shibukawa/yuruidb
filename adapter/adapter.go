@@ -31,9 +31,18 @@ type Config struct {
 	Capabilities yuruidb.Capabilities
 }
 
-func New(backend Backend, config Config) (yuruidb.Store, error) {
+func NewRaw(backend Backend, config Config) (yuruidb.RawStore, error) {
 	if backend == nil || config.Identity == "" {
 		return nil, yuruidb.ErrInvalid
 	}
 	return recordstore.New(backend, config.Collection, config.Identity, config.Capabilities)
+}
+
+// New constructs a JSON-typed store over an atomic backend.
+func New[T any](backend Backend, config Config) (*yuruidb.Store[T], error) {
+	raw, err := NewRaw(backend, config)
+	if err != nil {
+		return nil, err
+	}
+	return yuruidb.Wrap[T](raw), nil
 }

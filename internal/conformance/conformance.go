@@ -12,7 +12,7 @@ import (
 	"testing"
 )
 
-type Open func(*testing.T) (yuruidb.Store, yuruidb.Store)
+type Open func(*testing.T) (yuruidb.RawStore, yuruidb.RawStore)
 
 func ID(t *testing.T) string {
 	t.Helper()
@@ -23,6 +23,41 @@ func ID(t *testing.T) string {
 	return id
 }
 func Run(t *testing.T, open Open) {
+	t.Run("TypedJSON", func(t *testing.T) {
+		type data struct {
+			Text  string `json:"text"`
+			Count int    `json:"count"`
+		}
+		rawA, rawB := open(t)
+		a, b := yuruidb.Wrap[data](rawA), yuruidb.Wrap[data](rawB)
+		ctx := context.Background()
+		id := ID(t)
+		r, err := a.Insert(ctx, id, data{Text: "JSON 日本語", Count: 1})
+		if err != nil {
+			t.Fatal(err)
+		}
+		got, err := b.Get(ctx, id)
+		if err != nil || got != r || got.ID() != id {
+			t.Fatalf("typed get: %+v vs %+v; %v", got, r, err)
+		}
+		updated, err := b.Update(ctx, id, data{Text: "updated", Count: 2}, r.Revision())
+		if err != nil || updated.Revision() == r.Revision() {
+			t.Fatalf("typed update: %+v %v", updated, err)
+		}
+		if _, err := a.Update(ctx, id, data{}, r.Revision()); !errors.Is(err, yuruidb.ErrConflict) {
+			t.Fatalf("typed stale revision: %v", err)
+		}
+		page, err := a.List(ctx, yuruidb.ListOptions{Limit: 1})
+		if err != nil || len(page.Records) != 1 || page.Records[0] != updated {
+			t.Fatalf("typed list: %+v %v", page, err)
+		}
+		if err := a.Delete(ctx, id, updated.Revision()); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := b.Get(ctx, id); !errors.Is(err, yuruidb.ErrNotFound) {
+			t.Fatalf("typed deleted: %v", err)
+		}
+	})
 	t.Run("CRUDAndABA", func(t *testing.T) {
 		a, b := open(t)
 		ctx := context.Background()

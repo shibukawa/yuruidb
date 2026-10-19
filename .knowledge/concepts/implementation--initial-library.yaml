@@ -3,16 +3,22 @@ type: implementation
 title: Initial statically composed Go storage library
 lifecycle: active
 authority: observed
-summary: Common UUIDv7 record API, eleven built-in drivers, HTTP auth, static-import profiles, and locally verified
-  concurrency semantics.
+summary: Generic JSON record API on Go 1.26+, eleven statically imported drivers, HTTP auth, import profiles, and
+  locally verified concurrency semantics.
 facts:
   public_entry_points:
-  - yuruidb.Store
-  - yuruidb.Open
+  - yuruidb.Store[T]
+  - yuruidb.Record[T]
+  - yuruidb.Page[T]
+  - yuruidb.Open[T]
+  - yuruidb.RawStore
+  - yuruidb.OpenRaw
+  - yuruidb.Wrap[T]
   - yuruidb.Register
   - yuruidb.Config
   - yuruidb.NewID
-  - github.com/shibukawa/yuruidb/adapter
+  - github.com/shibukawa/yuruidb/adapter.New[T]
+  - github.com/shibukawa/yuruidb/adapter.NewRaw
   drivers:
   - memory
   - bbolt
@@ -40,6 +46,16 @@ facts:
   - No durable format migrations
   - CF KV has no conditional mutation contract
   - Caller-injected auth for SSO/ADC/federation beyond supplied environment/metadata providers
+  minimum_go_version: 1.26.0
+  data_encoding: encoding/json in Store[T]; drivers register non-generic raw byte factories and expose Open[T] plus
+    OpenRaw.
+  kv_api: Typed Store[T].Set/Remove expose explicit unconditional KV operations. Other drivers return ErrUnsupported;
+    Insert/Update/Delete do not degrade into unconditional writes.
+  verified_go_versions:
+  - 1.26.0
+  - 1.27.0
+  record_metadata: ID()/Revision() read private fields; Data remains editable. Record JSON supports id/revision/data
+    in both directions.
 relations:
 - relation: implements
   to: requirement:record-crud
@@ -59,25 +75,35 @@ verification:
     authority: observed
     basis:
     - path: store.go
-      input_hash: 46819aea81b5141eba62152d0b5c1160dee0f93fb65eb80c5348c156a061e058
+      input_hash: 6a2f8325336ed512d02d3f1032200ce17e13d19cba32f31622f33457c46e95be
     - path: id.go
       input_hash: 706422e1415b75d85b8a153aa765d3ee673a92d8c8b161beee93d2affd668854
     - path: config.go
       input_hash: 12b72dfea7406b6f32bfce97a89ab1e80675f308f2dd1c34204c297074e501fa
     - path: internal/recordstore/store.go
-      input_hash: 1c049b43afb901b820bd12ee4b6a51723b25aaf3a606a73e203f35d6795d86d8
+      input_hash: ab76d1226e9024b29273fca59fbd3d445da9f23c34ce978d0123c88e9c153fb0
     - path: internal/conformance/conformance.go
-      input_hash: 3d419ff315c002b499f8dc17f90e894b320592874c0e0d205ccb62fbe11efaf2
+      input_hash: 6a8a6310e325545cee6703bdacde8725ce6a04486572083196c29d0683cd08ba
     - path: docs/implementation-validation.md
-      input_hash: ee1e766d12aec0a1161c4d9eb0f8173763fc291ec4111be44d7d2ed538acee1f
+      input_hash: da702ead96402b1bc0dd9ddfba64aa1b2c7aee00df09d82033d08b9063739edf
     - path: drivers/s3/s3_test.go
-      input_hash: 93d4d62f8cd310c422856f1080e047a14c58210c32a02ca308e524793da5226c
+      input_hash: cf605feb388a516b1788ea8f00db3ad3aedc32221e01cc2302d9e16d7dca5aa7
     - path: drivers/sql/sql_test.go
-      input_hash: 82cef52633f2a0af654240d81a30e1d73ef8a28b2a5d796b3453d929684382bd
+      input_hash: 3f68768cb50620ff6e3ef0368b4beebcc3f3ef400821d760a25a5e84982cbf1c
     - path: drivers/d1/d1_test.go
-      input_hash: 06587e7b332052fec319ccb638a09cc0b642658f6e3bc9ba78190a7fd8491b61
+      input_hash: dcc15d267ddc7564f9eac234c19344ed0baeac210e5c5789a06d6c3d2c938cc4
     - path: auth/aws/aws_test.go
       input_hash: bf8ab31a2215a161f0d70172757eb9b357166a84435d25b3a00d08cffa9331d0
+    - path: raw.go
+      input_hash: 924f3f0aaab3b6aed88fececc7c35d8928cc57d69ce8605a5221f683ca702ced
+    - path: store_test.go
+      input_hash: 6b85d86b0a9101cffe03e885416898efaad1f212dcbe4655f50e6e29e5482bad
+    - path: go.mod
+      input_hash: dcf571aed9e1685ae6a1de15e63471fb88b9f38e88e0083874caf4dc808767e3
+    - path: record.go
+      input_hash: 720514acfcf76c8e0df7cb75a5e5524871275f00c2015a2b96ca87c2917f0b9d
+    - path: record_test.go
+      input_hash: fa0dcbbfae969bba7c215582ef7014b0c8d73237866b540696fbdc434909af7e
     evidence:
       input_path: docs/implementation-validation.md
   build-profiles:
@@ -91,7 +117,7 @@ verification:
     - path: backends/backends.go
       input_hash: 28d096d83dc44ea6ac45d8443c5ca3ad3bd0d418a7ce7ea994b8a3e40f0e1a06
     - path: docs/implementation-validation.md
-      input_hash: ee1e766d12aec0a1161c4d9eb0f8173763fc291ec4111be44d7d2ed538acee1f
+      input_hash: da702ead96402b1bc0dd9ddfba64aa1b2c7aee00df09d82033d08b9063739edf
     evidence:
       input_path: docs/implementation-validation.md
 open_questions:

@@ -11,8 +11,8 @@ import (
 )
 
 func TestConformance(t *testing.T) {
-	conformance.Run(t, func(t *testing.T) (yuruidb.Store, yuruidb.Store) {
-		s, err := bbolt.Open(context.Background(), bbolt.Config{Path: filepath.Join(t.TempDir(), "db"), Collection: "items"})
+	conformance.Run(t, func(t *testing.T) (yuruidb.RawStore, yuruidb.RawStore) {
+		s, err := bbolt.OpenRaw(context.Background(), bbolt.Config{Path: filepath.Join(t.TempDir(), "db"), Collection: "items"})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -24,7 +24,7 @@ func TestPersistenceAndCollections(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "db")
 	config := bbolt.Config{Path: path, Collection: "items"}
-	s, err := bbolt.Open(ctx, config)
+	s, err := bbolt.OpenRaw(ctx, config)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -36,7 +36,7 @@ func TestPersistenceAndCollections(t *testing.T) {
 	if err = s.Close(); err != nil {
 		t.Fatal(err)
 	}
-	s, err = bbolt.Open(ctx, config)
+	s, err = bbolt.OpenRaw(ctx, config)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -48,7 +48,7 @@ func TestPersistenceAndCollections(t *testing.T) {
 		t.Fatal(err)
 	}
 	s.Close()
-	s, err = bbolt.Open(ctx, config)
+	s, err = bbolt.OpenRaw(ctx, config)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -57,7 +57,7 @@ func TestPersistenceAndCollections(t *testing.T) {
 	}
 	s.Close()
 	config.Collection = "other"
-	s, err = bbolt.Open(ctx, config)
+	s, err = bbolt.OpenRaw(ctx, config)
 	if err != nil {
 		t.Fatal(err)
 	}

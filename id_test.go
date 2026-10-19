@@ -42,7 +42,7 @@ func TestInvalidIdentifiers(t *testing.T) {
 	}
 }
 func TestMissingDriver(t *testing.T) {
-	if _, err := Open(context.Background(), "not-imported", nil); !errors.Is(err, ErrUnsupported) {
+	if _, err := Open[struct{}](context.Background(), "not-imported", nil); !errors.Is(err, ErrUnsupported) {
 		t.Fatal(err)
 	}
 }

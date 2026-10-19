@@ -26,22 +26,22 @@ type transport struct {
 	client       httpx.Client
 	base, prefix string
 }
-type Store struct {
+type RawStore struct {
 	*recordstore.Store
 	transport *transport
 	prefix    string
 }
 
 func init() {
-	yuruidb.Register("cfkv", func(ctx context.Context, v any) (yuruidb.Store, error) {
+	yuruidb.Register("cfkv", func(ctx context.Context, v any) (yuruidb.RawStore, error) {
 		c, err := yuruidb.DecodeConfig[Config](v)
 		if err != nil {
 			return nil, err
 		}
-		return Open(ctx, c)
+		return OpenRaw(ctx, c)
 	})
 }
-func Open(ctx context.Context, c Config) (*Store, error) {
+func OpenRaw(ctx context.Context, c Config) (*RawStore, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -64,7 +64,7 @@ func Open(ctx context.Context, c Config) (*Store, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Store{s, t, c.Collection + "/"}, nil
+	return &RawStore{s, t, c.Collection + "/"}, nil
 }
 func (t *transport) Read(ctx context.Context, key string) (recordstore.Item, error) {
 	r, err := t.client.Do(ctx, "GET", t.base+"/values/"+url.PathEscape(key), nil, nil, false)
@@ -115,31 +115,31 @@ func (t *transport) Close() error { return nil }
 
 // Set unconditionally creates or replaces a value. Its returned revision
 // identifies that value but cannot be used for a conditional KV mutation.
-func (s *Store) Set(ctx context.Context, id string, value []byte) (yuruidb.Record, error) {
+func (s *RawStore) Set(ctx context.Context, id string, value []byte) (yuruidb.RawRecord, error) {
 	if err := s.Check(ctx); err != nil {
-		return yuruidb.Record{}, err
+		return yuruidb.RawRecord{}, err
 	}
 	if err := yuruidb.ValidateID(id); err != nil {
-		return yuruidb.Record{}, err
+		return yuruidb.RawRecord{}, err
 	}
 	revision, err := yuruidb.NewRevision()
 	if err != nil {
-		return yuruidb.Record{}, err
+		return yuruidb.RawRecord{}, err
 	}
 	e := recordstore.Envelope{ID: id, Value: value, Revision: revision}
 	b, err := json.Marshal(e)
 	if err != nil {
-		return yuruidb.Record{}, err
+		return yuruidb.RawRecord{}, err
 	}
 	err = s.transport.mutate(ctx, "PUT", s.prefix+id, b)
 	if err != nil {
-		return yuruidb.Record{}, err
+		return yuruidb.RawRecord{}, err
 	}
-	return yuruidb.Record{ID: id, Value: append([]byte(nil), value...), Revision: revision}, nil
+	return yuruidb.RawRecord{ID: id, Value: append([]byte(nil), value...), Revision: revision}, nil
 }
 
 // Remove is unconditional and may race writers. Reads may remain stale.
-func (s *Store) Remove(ctx context.Context, id string) error {
+func (s *RawStore) Remove(ctx context.Context, id string) error {
 	if err := s.Check(ctx); err != nil {
 		return err
 	}
@@ -164,4 +164,13 @@ func (t *transport) mutate(ctx context.Context, method, key string, body []byte)
 		return fmt.Errorf("yuruidb: KV mutation failed")
 	}
 	return nil
+}
+
+// Open opens a JSON-typed collection using this driver.
+func Open[T any](ctx context.Context, c Config) (*yuruidb.Store[T], error) {
+	raw, err := OpenRaw(ctx, c)
+	if err != nil {
+		return nil, err
+	}
+	return yuruidb.Wrap[T](raw), nil
 }

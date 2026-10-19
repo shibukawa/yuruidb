@@ -1,6 +1,6 @@
 module github.com/shibukawa/yuruidb
 
-go 1.23.0
+go 1.26.0
 
 require go.etcd.io/bbolt v1.4.3
 

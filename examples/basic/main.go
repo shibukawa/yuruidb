@@ -10,6 +10,10 @@ import (
 	"path/filepath"
 )
 
+type Note struct {
+	Text string `json:"text"`
+}
+
 func main() {
 	if err := run(); err != nil {
 		log.Fatal(err)
@@ -22,7 +26,7 @@ func run() error {
 		return err
 	}
 	defer os.RemoveAll(dir)
-	store, err := yuruidb.Open(ctx, "bbolt", yuruidb.Config{"Path": filepath.Join(dir, "records.db"), "Collection": "notes"})
+	store, err := yuruidb.Open[Note](ctx, "bbolt", yuruidb.Config{"Path": filepath.Join(dir, "records.db"), "Collection": "notes"})
 	if err != nil {
 		return err
 	}
@@ -31,11 +35,11 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	r, err := store.Insert(ctx, id, []byte("hello"))
+	r, err := store.Insert(ctx, id, Note{Text: "hello"})
 	if err != nil {
 		return err
 	}
-	r, err = store.Update(ctx, r.ID, []byte("hello again"), r.Revision)
+	r, err = store.Update(ctx, r.ID(), Note{Text: "hello again"}, r.Revision())
 	if err != nil {
 		return err
 	}
@@ -43,6 +47,6 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	fmt.Printf("%d record: %s\n", len(page.Records), page.Records[0].Value)
-	return store.Delete(ctx, r.ID, r.Revision)
+	fmt.Printf("%d record: %s\n", len(page.Records), page.Records[0].Data.Text)
+	return store.Delete(ctx, r.ID(), r.Revision())
 }

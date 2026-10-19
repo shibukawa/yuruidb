@@ -11,10 +11,10 @@ import (
 )
 
 func TestHTTPConformance(t *testing.T) {
-	conformance.Run(t, func(t *testing.T) (yuruidb.Store, yuruidb.Store) {
+	conformance.Run(t, func(t *testing.T) (yuruidb.RawStore, yuruidb.RawStore) {
 		server := protocoltest.New(t, "firestore")
-		open := func() yuruidb.Store {
-			s, err := firestore.Open(context.Background(), firestore.Config{Endpoint: server.URL + "/v1", Project: "project", Collection: "items", Token: auth.StaticToken("test-token")})
+		open := func() yuruidb.RawStore {
+			s, err := firestore.OpenRaw(context.Background(), firestore.Config{Endpoint: server.URL + "/v1", Project: "project", Collection: "items", Token: auth.StaticToken("test-token")})
 			if err != nil {
 				t.Fatal(err)
 			}

@@ -27,7 +27,7 @@ type transport struct {
 
 var identifier = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]{0,62}$`)
 
-func Open(ctx context.Context, e Executor, c Config) (yuruidb.Store, error) {
+func Open(ctx context.Context, e Executor, c Config) (yuruidb.RawStore, error) {
 	if err := yuruidb.ValidateCollection(c.Collection); err != nil {
 		return nil, err
 	}

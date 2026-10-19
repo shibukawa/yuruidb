@@ -16,7 +16,7 @@ assertions:
   authority: authored
   basis:
   - path: docs/requirements-input.md
-    input_hash: fa4903b32f8d00a4eba019ac565db0fc3a9578473d3e858eb8c0da8c7d186a86
+    input_hash: 401edd4f59abce29df56c883931c4409a65443dabfd87aa8424ae9aa8cc2cd23
   evidence:
     input_path: docs/requirements-input.md
 facts:
@@ -51,9 +51,9 @@ verification:
     - path: scripts/check-builds.py
       input_hash: 616e685b0406c9bc8bfde7ce1b48cf41addc0f311a3e1efa43ad4f63b7e99c12
     - path: go.mod
-      input_hash: 596696603b70ef5a14c297e68e38f8476bc7127ad57a66cfd5ff6132cab74d33
+      input_hash: dcf571aed9e1685ae6a1de15e63471fb88b9f38e88e0083874caf4dc808767e3
     - path: docs/implementation-validation.md
-      input_hash: ee1e766d12aec0a1161c4d9eb0f8173763fc291ec4111be44d7d2ed538acee1f
+      input_hash: da702ead96402b1bc0dd9ddfba64aa1b2c7aee00df09d82033d08b9063739edf
     evidence:
       input_path: docs/implementation-validation.md
     scope:

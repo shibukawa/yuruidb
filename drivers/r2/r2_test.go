@@ -11,10 +11,10 @@ import (
 )
 
 func TestHTTPConformance(t *testing.T) {
-	conformance.Run(t, func(t *testing.T) (yuruidb.Store, yuruidb.Store) {
+	conformance.Run(t, func(t *testing.T) (yuruidb.RawStore, yuruidb.RawStore) {
 		server := protocoltest.New(t, "r2")
-		open := func() yuruidb.Store {
-			s, err := r2.Open(context.Background(), r2.Config{Endpoint: server.URL, Bucket: "bucket", Collection: "items", Credentials: aws.Static(aws.Credentials{AccessKey: "key", SecretKey: "secret"})})
+		open := func() yuruidb.RawStore {
+			s, err := r2.OpenRaw(context.Background(), r2.Config{Endpoint: server.URL, Bucket: "bucket", Collection: "items", Credentials: aws.Static(aws.Credentials{AccessKey: "key", SecretKey: "secret"})})
 			if err != nil {
 				t.Fatal(err)
 			}

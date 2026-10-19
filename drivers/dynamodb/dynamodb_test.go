@@ -11,10 +11,10 @@ import (
 )
 
 func TestHTTPConformance(t *testing.T) {
-	conformance.Run(t, func(t *testing.T) (yuruidb.Store, yuruidb.Store) {
+	conformance.Run(t, func(t *testing.T) (yuruidb.RawStore, yuruidb.RawStore) {
 		server := protocoltest.New(t, "dynamodb")
-		open := func() yuruidb.Store {
-			s, err := dynamodb.Open(context.Background(), dynamodb.Config{Endpoint: server.URL, Region: "test-region", Table: "table", Collection: "items", Credentials: aws.Static(aws.Credentials{AccessKey: "key", SecretKey: "secret"})})
+		open := func() yuruidb.RawStore {
+			s, err := dynamodb.OpenRaw(context.Background(), dynamodb.Config{Endpoint: server.URL, Region: "test-region", Table: "table", Collection: "items", Credentials: aws.Static(aws.Credentials{AccessKey: "key", SecretKey: "secret"})})
 			if err != nil {
 				t.Fatal(err)
 			}

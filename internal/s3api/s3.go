@@ -25,7 +25,7 @@ type transport struct {
 	base, prefix string
 }
 
-func Open(ctx context.Context, c Config, kind string) (yuruidb.Store, error) {
+func Open(ctx context.Context, c Config, kind string) (yuruidb.RawStore, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}

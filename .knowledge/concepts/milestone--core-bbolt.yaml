@@ -43,21 +43,31 @@ verification:
     authority: observed
     basis:
     - path: store.go
-      input_hash: 46819aea81b5141eba62152d0b5c1160dee0f93fb65eb80c5348c156a061e058
+      input_hash: 6a2f8325336ed512d02d3f1032200ce17e13d19cba32f31622f33457c46e95be
     - path: id.go
       input_hash: 706422e1415b75d85b8a153aa765d3ee673a92d8c8b161beee93d2affd668854
     - path: config.go
       input_hash: 12b72dfea7406b6f32bfce97a89ab1e80675f308f2dd1c34204c297074e501fa
     - path: internal/recordstore/store.go
-      input_hash: 1c049b43afb901b820bd12ee4b6a51723b25aaf3a606a73e203f35d6795d86d8
+      input_hash: ab76d1226e9024b29273fca59fbd3d445da9f23c34ce978d0123c88e9c153fb0
     - path: internal/conformance/conformance.go
-      input_hash: 3d419ff315c002b499f8dc17f90e894b320592874c0e0d205ccb62fbe11efaf2
+      input_hash: 6a8a6310e325545cee6703bdacde8725ce6a04486572083196c29d0683cd08ba
     - path: docs/implementation-validation.md
-      input_hash: ee1e766d12aec0a1161c4d9eb0f8173763fc291ec4111be44d7d2ed538acee1f
+      input_hash: da702ead96402b1bc0dd9ddfba64aa1b2c7aee00df09d82033d08b9063739edf
     - path: drivers/bbolt/bbolt.go
-      input_hash: 6ef16bcff8c0bcdfd3c8c89909cb7b3f4f48eae15b39658baf5744806af91557
+      input_hash: 4fafe4cac0bc243922cfac8ab9ff92c7640eb0cf0c5b91f79e35a89740cc35c0
     - path: drivers/bbolt/bbolt_test.go
-      input_hash: 663b340be314f6ffd951aa513f39da039449f2b16596883cf0e99856e944fd2f
+      input_hash: 7982c8178dc231e621ed16f3dd42593f0ab6b2e272d28dae8304dc26987fe4fb
+    - path: raw.go
+      input_hash: 924f3f0aaab3b6aed88fececc7c35d8928cc57d69ce8605a5221f683ca702ced
+    - path: store_test.go
+      input_hash: 6b85d86b0a9101cffe03e885416898efaad1f212dcbe4655f50e6e29e5482bad
+    - path: go.mod
+      input_hash: dcf571aed9e1685ae6a1de15e63471fb88b9f38e88e0083874caf4dc808767e3
+    - path: record.go
+      input_hash: 720514acfcf76c8e0df7cb75a5e5524871275f00c2015a2b96ca87c2917f0b9d
+    - path: record_test.go
+      input_hash: fa0dcbbfae969bba7c215582ef7014b0c8d73237866b540696fbdc434909af7e
     evidence:
       input_path: docs/implementation-validation.md
   reopen:
@@ -67,11 +77,11 @@ verification:
     authority: observed
     basis:
     - path: drivers/bbolt/bbolt.go
-      input_hash: 6ef16bcff8c0bcdfd3c8c89909cb7b3f4f48eae15b39658baf5744806af91557
+      input_hash: 4fafe4cac0bc243922cfac8ab9ff92c7640eb0cf0c5b91f79e35a89740cc35c0
     - path: drivers/bbolt/bbolt_test.go
-      input_hash: 663b340be314f6ffd951aa513f39da039449f2b16596883cf0e99856e944fd2f
+      input_hash: 7982c8178dc231e621ed16f3dd42593f0ab6b2e272d28dae8304dc26987fe4fb
     - path: docs/implementation-validation.md
-      input_hash: ee1e766d12aec0a1161c4d9eb0f8173763fc291ec4111be44d7d2ed538acee1f
+      input_hash: da702ead96402b1bc0dd9ddfba64aa1b2c7aee00df09d82033d08b9063739edf
     evidence:
       input_path: docs/implementation-validation.md
   imports:
@@ -83,9 +93,9 @@ verification:
     - path: scripts/check-builds.py
       input_hash: 616e685b0406c9bc8bfde7ce1b48cf41addc0f311a3e1efa43ad4f63b7e99c12
     - path: go.mod
-      input_hash: 596696603b70ef5a14c297e68e38f8476bc7127ad57a66cfd5ff6132cab74d33
+      input_hash: dcf571aed9e1685ae6a1de15e63471fb88b9f38e88e0083874caf4dc808767e3
     - path: docs/implementation-validation.md
-      input_hash: ee1e766d12aec0a1161c4d9eb0f8173763fc291ec4111be44d7d2ed538acee1f
+      input_hash: da702ead96402b1bc0dd9ddfba64aa1b2c7aee00df09d82033d08b9063739edf
     evidence:
       input_path: docs/implementation-validation.md
 relations:

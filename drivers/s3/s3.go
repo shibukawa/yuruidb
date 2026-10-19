@@ -9,13 +9,24 @@ import (
 
 type Config = s3api.Config
 
-func Open(ctx context.Context, c Config) (yuruidb.Store, error) { return s3api.Open(ctx, c, "s3") }
+func OpenRaw(ctx context.Context, c Config) (yuruidb.RawStore, error) {
+	return s3api.Open(ctx, c, "s3")
+}
 func init() {
-	yuruidb.Register("s3", func(ctx context.Context, v any) (yuruidb.Store, error) {
+	yuruidb.Register("s3", func(ctx context.Context, v any) (yuruidb.RawStore, error) {
 		c, err := yuruidb.DecodeConfig[Config](v)
 		if err != nil {
 			return nil, err
 		}
-		return Open(ctx, c)
+		return OpenRaw(ctx, c)
 	})
+}
+
+// Open opens a JSON-typed collection using this driver.
+func Open[T any](ctx context.Context, c Config) (*yuruidb.Store[T], error) {
+	raw, err := OpenRaw(ctx, c)
+	if err != nil {
+		return nil, err
+	}
+	return yuruidb.Wrap[T](raw), nil
 }

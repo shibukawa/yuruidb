@@ -17,10 +17,10 @@ import (
 )
 
 func TestHTTPConformance(t *testing.T) {
-	conformance.Run(t, func(t *testing.T) (yuruidb.Store, yuruidb.Store) {
+	conformance.Run(t, func(t *testing.T) (yuruidb.RawStore, yuruidb.RawStore) {
 		server := protocoltest.New(t, "s3")
-		open := func() yuruidb.Store {
-			s, err := s3.Open(context.Background(), s3.Config{Endpoint: server.URL, Region: "test-region", Bucket: "bucket", Collection: "items", Credentials: aws.Static(aws.Credentials{AccessKey: "key", SecretKey: "secret", SessionToken: "session"})})
+		open := func() yuruidb.RawStore {
+			s, err := s3.OpenRaw(context.Background(), s3.Config{Endpoint: server.URL, Region: "test-region", Bucket: "bucket", Collection: "items", Credentials: aws.Static(aws.Credentials{AccessKey: "key", SecretKey: "secret", SessionToken: "session"})})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -33,7 +33,7 @@ func TestHTTPConformance(t *testing.T) {
 
 func TestProcessCAS(t *testing.T) {
 	if endpoint := os.Getenv("YURUIDB_TEST_ENDPOINT"); endpoint != "" {
-		s, err := s3.Open(context.Background(), s3.Config{Endpoint: endpoint, Bucket: "bucket", Collection: "items", Credentials: aws.Static(aws.Credentials{AccessKey: "key", SecretKey: "secret"})})
+		s, err := s3.OpenRaw(context.Background(), s3.Config{Endpoint: endpoint, Bucket: "bucket", Collection: "items", Credentials: aws.Static(aws.Credentials{AccessKey: "key", SecretKey: "secret"})})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -49,7 +49,7 @@ func TestProcessCAS(t *testing.T) {
 		return
 	}
 	server := protocoltest.New(t, "s3")
-	s, err := s3.Open(context.Background(), s3.Config{Endpoint: server.URL, Bucket: "bucket", Collection: "items", Credentials: aws.Static(aws.Credentials{AccessKey: "key", SecretKey: "secret"})})
+	s, err := s3.OpenRaw(context.Background(), s3.Config{Endpoint: server.URL, Bucket: "bucket", Collection: "items", Credentials: aws.Static(aws.Credentials{AccessKey: "key", SecretKey: "secret"})})
 	if err != nil {
 		t.Fatal(err)
 	}

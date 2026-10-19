@@ -1,7 +1,8 @@
 id: requirement:record-crud
 type: requirement
 title: ID-based record operations
-summary: Support insert, update, select by ID, list, and delete without foreign keys.
+summary: Support generic JSON records with insert, update, ID lookup, collection listing, and delete without foreign
+  keys.
 lifecycle: accepted
 authority: authored
 aliases:
@@ -9,6 +10,10 @@ aliases:
 - select
 - ID指定
 - 一覧取得
+- generics
+- JSON
+- ジェネリクス
+- Record[T]
 assertions:
 - key: operations
   predicate: required_operations
@@ -21,7 +26,7 @@ assertions:
   authority: authored
   basis:
   - path: docs/requirements-input.md
-    input_hash: fa4903b32f8d00a4eba019ac565db0fc3a9578473d3e858eb8c0da8c7d186a86
+    input_hash: 401edd4f59abce29df56c883931c4409a65443dabfd87aa8424ae9aa8cc2cd23
   evidence:
     input_path: docs/requirements-input.md
 - key: query-scope
@@ -30,10 +35,36 @@ assertions:
   authority: authored
   basis:
   - path: docs/requirements-input.md
-    input_hash: fa4903b32f8d00a4eba019ac565db0fc3a9578473d3e858eb8c0da8c7d186a86
+    input_hash: 401edd4f59abce29df56c883931c4409a65443dabfd87aa8424ae9aa8cc2cd23
   evidence:
     locator: 検索範囲の回答
     input_path: docs/requirements-input.md
+- key: generic-json-records
+  predicate: required_record_api
+  value:
+    open: yuruidb.Open[T](ctx, driver, Config)
+    record:
+    - ID metadata
+    - Revision metadata
+    - Data T
+    payload: JSON-serializable data
+  authority: authored
+  basis:
+  - path: docs/requirements-input.md
+    input_hash: 401edd4f59abce29df56c883931c4409a65443dabfd87aa8424ae9aa8cc2cd23
+  evidence:
+    input_path: docs/requirements-input.md
+    locator: Goの最低バージョンと型付きJSONレコード
+- key: read-only-metadata
+  predicate: required_record_metadata_visibility
+  value: Hide ID and revision fields; expose metadata through read methods.
+  authority: authored
+  basis:
+  - path: docs/requirements-input.md
+    input_hash: 401edd4f59abce29df56c883931c4409a65443dabfd87aa8424ae9aa8cc2cd23
+  evidence:
+    input_path: docs/requirements-input.md
+    locator: レコードのメタデータ
 facts:
   proposed_api:
   - Insert
@@ -42,7 +73,7 @@ facts:
   - Update
   - Delete
   proposed_container: collection
-  payload_proposal: Opaque bytes with optional codecs or typed wrappers.
+  payload_proposal: Superseded by the user requirement for generic JSON records.
   insert_proposal: Create only when absent; never silently upsert.
   update_proposal: Replace the value of an existing record while preserving ID.
   error_candidates:
@@ -57,8 +88,24 @@ facts:
   - List
   - Update
   - Delete
-  implemented_value: '[]byte; a provisional engineering choice, not a new user requirement.'
-  implemented_container: Collection-bound Store; portable collection names.
+  implemented_value: T any with encoding/json marshal and unmarshal; conversion validated before writes.
+  implemented_container: Collection-bound Store[T]; Record[T] and Page[T]; portable collection names.
+  driver_contract: Non-generic RawStore, RawRecord{ID, Value, Revision}, RawPage, Factory, OpenRaw. Wrap[T] provides
+    the typed facade.
+  json_rules:
+  - Struct tags and custom JSON methods follow encoding/json.
+  - Writes validate both encode and decode before any storage mutation; failures wrap ErrInvalid.
+  - Get/List report invalid JSON or incompatible stored schemas; List returns no partial page.
+  - Use compatible schemas across processes. T=any decodes JSON numbers as float64.
+  - Default JSON decoding avoids caller input aliasing; ownership inside custom JSON methods is the application
+    responsibility.
+  format_compatibility: The existing byte payload envelope is preserved. Old raw bytes must contain compatible JSON
+    to use the typed facade.
+  metadata_api: Private id/revision fields; value-receiver ID() and Revision(); editable Data. Updating storage
+    returns a new record and leaves previous metadata unchanged.
+  record_json: MarshalJSON preserves id/revision/data. UnmarshalJSON replaces a complete value including metadata;
+    errors leave the existing record unchanged. Encapsulation prevents accidental field assignment, not JSON-based
+    replacement or stale revisions.
 acceptance:
   operation-coverage:
     text: Each full-capability driver supports the five record operations.
@@ -68,6 +115,16 @@ acceptance:
     text: Get resolves an ID and List operates within the selected record collection.
     verified_by:
     - crud-contract
+  typed-json:
+    text: The public Open[T] API returns typed JSON records; invalid data fails before writes and stale revisions
+      retain their conflict semantics.
+    verified_by:
+    - typed-json-contract
+  read-only-metadata:
+    text: Typed records expose metadata only through ID()/Revision(), update returns a new version, and JSON preserves
+      metadata.
+    verified_by:
+    - metadata-contract
 verification:
   crud-contract:
     state: passed
@@ -76,29 +133,93 @@ verification:
     authority: observed
     basis:
     - path: store.go
-      input_hash: 46819aea81b5141eba62152d0b5c1160dee0f93fb65eb80c5348c156a061e058
+      input_hash: 6a2f8325336ed512d02d3f1032200ce17e13d19cba32f31622f33457c46e95be
     - path: id.go
       input_hash: 706422e1415b75d85b8a153aa765d3ee673a92d8c8b161beee93d2affd668854
     - path: config.go
       input_hash: 12b72dfea7406b6f32bfce97a89ab1e80675f308f2dd1c34204c297074e501fa
     - path: internal/recordstore/store.go
-      input_hash: 1c049b43afb901b820bd12ee4b6a51723b25aaf3a606a73e203f35d6795d86d8
+      input_hash: ab76d1226e9024b29273fca59fbd3d445da9f23c34ce978d0123c88e9c153fb0
     - path: internal/conformance/conformance.go
-      input_hash: 3d419ff315c002b499f8dc17f90e894b320592874c0e0d205ccb62fbe11efaf2
+      input_hash: 6a8a6310e325545cee6703bdacde8725ce6a04486572083196c29d0683cd08ba
     - path: docs/implementation-validation.md
-      input_hash: ee1e766d12aec0a1161c4d9eb0f8173763fc291ec4111be44d7d2ed538acee1f
+      input_hash: da702ead96402b1bc0dd9ddfba64aa1b2c7aee00df09d82033d08b9063739edf
+    - path: raw.go
+      input_hash: 924f3f0aaab3b6aed88fececc7c35d8928cc57d69ce8605a5221f683ca702ced
+    - path: store_test.go
+      input_hash: 6b85d86b0a9101cffe03e885416898efaad1f212dcbe4655f50e6e29e5482bad
+    - path: go.mod
+      input_hash: dcf571aed9e1685ae6a1de15e63471fb88b9f38e88e0083874caf4dc808767e3
+    - path: record.go
+      input_hash: 720514acfcf76c8e0df7cb75a5e5524871275f00c2015a2b96ca87c2917f0b9d
+    - path: record_test.go
+      input_hash: fa0dcbbfae969bba7c215582ef7014b0c8d73237866b540696fbdc434909af7e
     evidence:
       input_path: docs/implementation-validation.md
     scope:
       environment:
       - local-db
       - http-fixture
+  typed-json-contract:
+    state: passed
+    method: integration
+    test: GOTOOLCHAIN=go1.26.0 go test -race ./...; go test -race ./...
+    authority: observed
+    basis:
+    - path: store.go
+      input_hash: 6a2f8325336ed512d02d3f1032200ce17e13d19cba32f31622f33457c46e95be
+    - path: raw.go
+      input_hash: 924f3f0aaab3b6aed88fececc7c35d8928cc57d69ce8605a5221f683ca702ced
+    - path: store_test.go
+      input_hash: 6b85d86b0a9101cffe03e885416898efaad1f212dcbe4655f50e6e29e5482bad
+    - path: go.mod
+      input_hash: dcf571aed9e1685ae6a1de15e63471fb88b9f38e88e0083874caf4dc808767e3
+    - path: internal/conformance/conformance.go
+      input_hash: 6a8a6310e325545cee6703bdacde8725ce6a04486572083196c29d0683cd08ba
+    - path: drivers/cfkv/cfkv_test.go
+      input_hash: 7ab01019b5ede7a85260b627809eb1199257e669f457e3734bc8da00ffee2828
+    - path: docs/implementation-validation.md
+      input_hash: da702ead96402b1bc0dd9ddfba64aa1b2c7aee00df09d82033d08b9063739edf
+    - path: record.go
+      input_hash: 720514acfcf76c8e0df7cb75a5e5524871275f00c2015a2b96ca87c2917f0b9d
+    - path: record_test.go
+      input_hash: fa0dcbbfae969bba7c215582ef7014b0c8d73237866b540696fbdc434909af7e
+    evidence:
+      input_path: docs/implementation-validation.md
+      locator: Go 1.26と型付きJSON API
+  metadata-contract:
+    state: passed
+    method: unit
+    test: GOTOOLCHAIN=go1.26.0 go test -race ./...; go test -race ./...
+    authority: observed
+    basis:
+    - path: record.go
+      input_hash: 720514acfcf76c8e0df7cb75a5e5524871275f00c2015a2b96ca87c2917f0b9d
+    - path: record_test.go
+      input_hash: fa0dcbbfae969bba7c215582ef7014b0c8d73237866b540696fbdc434909af7e
+    - path: store.go
+      input_hash: 6a2f8325336ed512d02d3f1032200ce17e13d19cba32f31622f33457c46e95be
+    - path: store_test.go
+      input_hash: 6b85d86b0a9101cffe03e885416898efaad1f212dcbe4655f50e6e29e5482bad
+    - path: internal/conformance/conformance.go
+      input_hash: 6a8a6310e325545cee6703bdacde8725ce6a04486572083196c29d0683cd08ba
+    - path: drivers/cfkv/cfkv_test.go
+      input_hash: 7ab01019b5ede7a85260b627809eb1199257e669f457e3734bc8da00ffee2828
+    - path: docs/implementation-validation.md
+      input_hash: da702ead96402b1bc0dd9ddfba64aa1b2c7aee00df09d82033d08b9063739edf
+    evidence:
+      input_path: docs/implementation-validation.md
+      locator: レコードメタデータの非公開化
 open_questions:
   value-format:
     text: Use bytes, JSON, generics, or a combination?
-    state: deferred
-    resolution: Initial implementation uses bytes. Revisit typed codecs after usage feedback; no final user approval
-      of the API shape is implied.
+    state: answered
+    resolution: User selected JSON data and generics, Open[Data], Record[Data]{Id, Revision, Data}; the former provisional
+      byte API is retained only as RawStore for drivers. Metadata subsequently moved to read-only ID()/Revision()
+      methods; Data remains an exported field.
+    evidence:
+      input_path: docs/requirements-input.md
+      locator: Goの最低バージョンと型付きJSONレコード
   collection-shape:
     text: How are collections/namespaces and their names represented?
     state: deferred

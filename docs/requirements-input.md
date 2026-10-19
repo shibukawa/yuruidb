@@ -51,3 +51,30 @@
 > READMEは英語で、README.ja.mdは日本語でお願いします。ライセンスはapache2でお願いします
 
 初版コミットとoriginへのpushが明示的に依頼された。README.mdは英語、README.ja.mdは日本語とし、プロジェクトのライセンスはApache-2.0を採用する。
+
+
+## Goの最低バージョンと型付きJSONレコード
+
+> 利用可能バージョンは現在アクティブなGo 1.26以上に限定し、ジェネリクスを活用したい。レコードはJSONへのシリアライズできるデータが欲しいはず。以下の様にできないか？
+
+```go
+yuruidb.Open[Data](ctx, "bbolt", yuruidb.Config{
+    "Path": "records.db",
+    "Collection": "notes",
+})
+
+type Record[Data] struct {
+    Id string
+    Revision string
+    Data Data
+}
+```
+
+最低対応バージョンはGo 1.26。公開APIは型引数でデータ型を選び、レコードはId・Revision・Dataを持つ。JSON化できるデータを対象とし、以前の暫定bytes選択を置き換える。JSON変換の検証方法や低水準ドライバAPIの分離は実装上の選択として記録する。
+
+
+## レコードのメタデータ
+
+> idなどはhiddenの方が良いか？変えることはないのでメソッドにしても良いと思う
+
+RecordのID・revisionを非公開フィールドにし、読み取りメソッドで公開する。Goの命名に合わせてID()・Revision()とし、Dataは公開フィールドを維持する。更新は新しいRevisionを持つRecordを返す。メソッド名とJSON変換の互換維持は実装上の選択。

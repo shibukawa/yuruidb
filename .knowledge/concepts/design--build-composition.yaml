@@ -58,7 +58,7 @@ assertions:
   authority: inferred
   basis:
   - path: docs/requirements-input.md
-    input_hash: fa4903b32f8d00a4eba019ac565db0fc3a9578473d3e858eb8c0da8c7d186a86
+    input_hash: 401edd4f59abce29df56c883931c4409a65443dabfd87aa8424ae9aa8cc2cd23
   evidence:
     input_path: docs/requirements-input.md
 - key: go-tags
@@ -77,7 +77,7 @@ assertions:
   authority: authored
   basis:
   - path: docs/requirements-input.md
-    input_hash: fa4903b32f8d00a4eba019ac565db0fc3a9578473d3e858eb8c0da8c7d186a86
+    input_hash: 401edd4f59abce29df56c883931c4409a65443dabfd87aa8424ae9aa8cc2cd23
   evidence:
     input_path: docs/requirements-input.md
     locator: バックエンド組み込み方法の明確化
@@ -111,7 +111,7 @@ verification:
     - path: backends/import_firebase.go
       input_hash: ec3ff1f033105a862158342cc4fed75ca516d6e72989eae3575ce4529ac6fc5c
     - path: docs/implementation-validation.md
-      input_hash: ee1e766d12aec0a1161c4d9eb0f8173763fc291ec4111be44d7d2ed538acee1f
+      input_hash: da702ead96402b1bc0dd9ddfba64aa1b2c7aee00df09d82033d08b9063739edf
     evidence:
       input_path: docs/implementation-validation.md
     scope:

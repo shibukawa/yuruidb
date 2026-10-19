@@ -16,7 +16,7 @@ import (
 )
 
 func TestRESTConformance(t *testing.T) {
-	conformance.Run(t, func(t *testing.T) (yuruidb.Store, yuruidb.Store) {
+	conformance.Run(t, func(t *testing.T) (yuruidb.RawStore, yuruidb.RawStore) {
 		db, err := sql.Open("sqlite3", ":memory:")
 		if err != nil {
 			t.Fatal(err)
@@ -76,8 +76,8 @@ func TestRESTConformance(t *testing.T) {
 			json.NewEncoder(w).Encode(map[string]any{"success": true, "result": []any{map[string]any{"success": true, "results": results, "meta": map[string]any{"changes": changes}}}})
 		}))
 		t.Cleanup(server.Close)
-		open := func() yuruidb.Store {
-			s, err := d1.Open(context.Background(), d1.Config{Endpoint: server.URL, AccountID: "account", DatabaseID: "database", Collection: "items", Token: auth.StaticToken("test-token"), AutoMigrate: true})
+		open := func() yuruidb.RawStore {
+			s, err := d1.OpenRaw(context.Background(), d1.Config{Endpoint: server.URL, AccountID: "account", DatabaseID: "database", Collection: "items", Token: auth.StaticToken("test-token"), AutoMigrate: true})
 			if err != nil {
 				t.Fatal(err)
 			}

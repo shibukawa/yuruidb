@@ -8,7 +8,8 @@ Goの同じAPIで、ローカルDB、リモートKVS、RDB、オブジェクト�
 
 | 項目 | 要件 |
 | --- | --- |
-| 言語・提供形態 | Goの組み込みライブラリ |
+| 言語・提供形態 | Go 1.26以上の組み込みライブラリ。ジェネリクスを活用 |
+| データ型 | JSONにシリアライズ可能なT。Open[T]とRecord[T]のID()・Revision()・Data |
 | 操作 | insert、update、select、delete。外部キーによる関係管理は持たない |
 | select | ID指定の取得と一覧取得 |
 | 並び順 | 作成順。UUIDv7のような時系列キーを使う |
@@ -42,7 +43,7 @@ bboltの制約は[公式README](https://github.com/etcd-io/bbolt)、KVの競合�
 
 ## 提案するAPIと競合の扱い
 
-初期実装はコレクション内の`Insert / Get / List / Update / Delete`を共通契約とし、値は`[]byte`にした。これは実装時の選択で、ユーザーが形式やAPI名を最終承認したという意味ではない。
+コレクション内の`Insert / Get / List / Update / Delete`を共通契約とする。追加要件で、Go 1.26以上、`Open[T]`、JSON化できる`Data T`、`Record[T]`を採用した。IDとrevisionは非公開とし、`ID()`・`Revision()`で読み取る。初期の暫定的な`[]byte` APIはドライバ用の`RawStore`として残し、共通の`Store[T]`でJSON変換する。型制約だけではJSON化を保証できないため、書き込み前にJSON変換と復元を検証する。
 
 Insertは既存IDを上書きしない。UpdateとDeleteは取得時の不透明なrevisionを渡し、古いrevisionなら競合を返す案を推奨する。revisionと時系列IDは別物で、IDは固定、revisionは更新ごとに変わる。同じ内容を書き戻した場合や削除後に同じIDを使った場合にも、古い更新を通さない設計が必要になる。
 
@@ -83,4 +84,4 @@ HTTP実装でも署名、認証更新、再試行の実装は必要になる。A
 
 共通契約、bbolt、memory、SQL、S3、DynamoDB、GCS、Firestore、Realtime Database、R2、D1、KVを実装した。共通conformance、別プロセスのCAS競合、署名の公式ベクトル、ビルドタグの実行ファイル検査を実施。実クラウド・実PostgreSQL・性能測定は未実施。
 
-Firebaseは初期実装で両製品を提供し、一覧は昇順、値はbytes、タグ構成はREADMEに示す内容を採用した。これらは実装上の選択として記録する。D1の実運用経路、KVの外部調停、降順、上限サイズ、性能目標、永続形式の移行は、利用・公開の判断時点で再検討する。
+Firebaseは初期実装で両製品を提供し、一覧は昇順、タグ構成はREADMEに示す内容を採用した。これらは実装上の選択として記録する。値は追加要件に従いジェネリクスとJSONに変更した。D1の実運用経路、KVの外部調停、降順、上限サイズ、性能目標、永続形式の移行は、利用・公開の判断時点で再検討する。

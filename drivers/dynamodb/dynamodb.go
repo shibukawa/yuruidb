@@ -33,15 +33,15 @@ type transport struct {
 }
 
 func init() {
-	yuruidb.Register("dynamodb", func(ctx context.Context, v any) (yuruidb.Store, error) {
+	yuruidb.Register("dynamodb", func(ctx context.Context, v any) (yuruidb.RawStore, error) {
 		c, err := yuruidb.DecodeConfig[Config](v)
 		if err != nil {
 			return nil, err
 		}
-		return Open(ctx, c)
+		return OpenRaw(ctx, c)
 	})
 }
-func Open(ctx context.Context, c Config) (yuruidb.Store, error) {
+func OpenRaw(ctx context.Context, c Config) (yuruidb.RawStore, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -144,3 +144,12 @@ func (t *transport) Keys(ctx context.Context, after string, n int) ([]string, bo
 	return keys, len(out.Last) > 0, nil
 }
 func (t *transport) Close() error { return nil }
+
+// Open opens a JSON-typed collection using this driver.
+func Open[T any](ctx context.Context, c Config) (*yuruidb.Store[T], error) {
+	raw, err := OpenRaw(ctx, c)
+	if err != nil {
+		return nil, err
+	}
+	return yuruidb.Wrap[T](raw), nil
+}
