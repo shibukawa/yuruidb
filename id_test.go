@@ -3,6 +3,7 @@ package yuruidb
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 )
 
@@ -35,14 +36,14 @@ func TestUUIDOrderingAndRollback(t *testing.T) {
 	}
 }
 func TestInvalidIdentifiers(t *testing.T) {
-	for _, id := range []string{"", "01912345-1234-4234-8234-123456789abc", "01912345-1234-7234-c234-123456789abc", "01912345-1234-7234-8234-123456789abC", "../bad"} {
+	for _, id := range []string{"", ".", "..", "../bad", "bad/id", "bad?query", "bad name", "bad\\name", strings.Repeat("a", 257)} {
 		if !errors.Is(ValidateID(id), ErrInvalid) {
 			t.Fatal(id)
 		}
 	}
 }
 func TestMissingDriver(t *testing.T) {
-	if _, err := Open[struct{}](context.Background(), "not-imported", nil); !errors.Is(err, ErrUnsupported) {
+	if _, err := Open(context.Background(), "not-imported", nil); !errors.Is(err, ErrUnsupported) {
 		t.Fatal(err)
 	}
 }

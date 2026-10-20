@@ -2,15 +2,13 @@
 
 [English](README.md) | [日本語](README.ja.md)
 
-A generic Go record storage library for JSON data with interchangeable backends. It provides CRUD by ID and creation-ordered listing using UUIDv7 keys. Every backend is statically imported; `aws`, `gcp`, and `cloudflare` build tags enable groups of those imports.
+A Go 1.27+ record storage library with interchangeable, statically imported backends. One `Store` owns a connection; generic methods select the registered data type and collection. JSON data uses `Record[T]` and `Page[T]`. IDs may be validated names or generated UUIDv7 strings. Listing uses ascending ID byte order.
 
-Cloud drivers use the standard library's HTTP client without cloud SDK dependencies. The core also imports only standard library packages. The bbolt driver depends on bbolt, and the SQLite Go driver is used only in tests.
+Cloud drivers use standard-library HTTP, without cloud SDK dependencies. The core has no external imports. bbolt is an optional driver dependency; cgo SQLite tests live in the separate [integration module](integration).
 
-The module path is `github.com/shibukawa/yuruidb`. Requires Go 1.26 or later.
+The module path is `github.com/shibukawa/yuruidb`.
 
 ## Usage
-
-Import the driver you need. A blank import registers its factory; `Open` creates the store explicitly.
 
 ```go
 import (
@@ -19,114 +17,111 @@ import (
     _ "github.com/shibukawa/yuruidb/drivers/bbolt"
 )
 
-type Note struct {
-    Text string `json:"text"`
-}
+type Job struct { Text string `json:"text"` }
+type Waiting Job
+type Done Job
 
 ctx := context.Background()
-store, err := yuruidb.Open[Note](ctx, "bbolt", yuruidb.Config{
-    "Path": "records.db",
-    "Collection": "notes",
-})
-// Handle each error in application code.
+store, err := yuruidb.Open(ctx, "bbolt", yuruidb.Config{"Path": "spool.db"})
+// Handle errors in application code.
 defer store.Close()
+err = store.Bind[Waiting]("jobs")
+err = store.Bind[Done]("done")
 
 id, err := yuruidb.NewID()
-record, err := store.Insert(ctx, id, Note{Text: "hello"})
-record, err = store.Update(ctx, id, Note{Text: "hello again"}, record.Revision())
-record, err = store.Get(ctx, id)
-page, err := store.List(ctx, yuruidb.ListOptions{Limit: 100})
-err = store.Delete(ctx, id, record.Revision())
+record, err := store.Insert(ctx, id, Waiting{Text: "hello"})
+record, err = store.Get[Waiting](ctx, id)
+record, err = store.Update(ctx, id, Waiting{Text: "updated"}, record.Revision())
+page, err := store.List[Waiting](ctx, yuruidb.ListOptions{Limit: 100})
+err = store.Delete[Waiting](ctx, id, record.Revision())
 // record.ID(), record.Revision(), record.Data.Text
 ```
 
-For a runnable example with error handling, see [examples/basic](examples/basic/main.go) and run `go run ./examples/basic`. Each driver also exposes `Open[T](ctx, Config)` for use through a named import.
+See [examples/basic](examples/basic/main.go) for runnable error handling. Drivers also expose `Open(ctx, Config)` through named imports. `Bind` validates registrations without I/O; the first operation creates its internal collection view. Unregistered types return `ErrInvalid`. Rebinding a type to another name or binding a different type to the same name is rejected. Pointer and value forms share a binding. `type Done Job` defines a distinct type; `type Done = Job` is an alias and shares Job's identity. Defined types retain fields/tags, but do not inherit Job's own methods.
 
-## JSON data types
+## Data and concurrency
 
-`T` can be a struct, pointer, map, slice, scalar, or `json.RawMessage` supported by `encoding/json`. Struct tags and custom `MarshalJSON` / `UnmarshalJSON` methods work as usual. Use compatible data types when opening the same collection from different processes.
+`T` can be any JSON-compatible struct, pointer, map, slice, scalar, `json.RawMessage`, or custom JSON type. Writes marshal and unmarshal before mutation, returning `ErrInvalid` for unsupported values. Use compatible schemas across clients. Returned data does not alias ordinary caller-owned maps/slices. Metadata is read-only in Go; record JSON retains `id`, `revision`, and `data`.
 
-Go cannot express “all JSON-serializable types” as a generic constraint, so `T` uses `any`. Writes validate both encoding and decoding before changing storage. Unsupported values such as functions, channels, cycles, or NaN return `ErrInvalid`. Stored JSON incompatible with `T` makes `Get` or `List` fail; `List` returns no partial page. Returned data is decoded from JSON rather than reusing the supplied pointer or map; custom JSON methods follow their own ownership behavior. With `T = any`, JSON numbers decode as `float64` under the normal `encoding/json` rules.
+- IDs contain 1–256 ASCII letters, digits, `.`, `_`, or `-`; `.`, `..`, and Firestore-reserved `__…__` names are rejected. Case is preserved. `NewID()` remains a process-monotonic UUIDv7 generator. UUIDv7 order is not exact cross-process commit order; names sort by bytes (`10` before `2`). Updates preserve IDs. Pages have no snapshot guarantee.
+- `Insert` never overwrites a live ID. It attempts conditional creation first, reading only on conflict. `Update` and `Delete` require a retrieved opaque revision. Revisions bind collection, ID, random write nonce, and native CAS token; current tokens avoid a pre-write GET. Backends that cannot return native tokens use readback when needed. Conflicts never adopt a newer revision automatically.
+- `Delete` uses conditional physical deletion on capable backends. Others retain conditional tombstones. An ID may be recreated; earlier record revisions remain stale. Existing tombstones can be removed with `store.PurgeTombstones[T](ctx)` on capable backends. Bucket version history and bbolt file compaction are separate storage concerns.
+- Value-bearing listing avoids per-item reads on bbolt, memory, SQL/D1, DynamoDB, and Firestore. S3/R2/GCS enumerate keys and read records; Firebase needs individual ETags. Listing may observe concurrent changes.
+- bbolt shares a DB per normalized file path, including symlink resolution, with reference-counted close. Five types can use five buckets in one file. Values use a compact binary envelope without base64 wrapping. It remains a local file backend, not a cross-process remote store.
 
-The record metadata is private in Go. JSON marshaling still produces `{"id": "...", "revision": "...", "data": ...}`. Unmarshaling replaces the complete record, including metadata; a decode error leaves the existing record unchanged. This prevents accidental field edits in Go; storage still validates revisions on every conditional write.
+## Unknown outcomes
 
-## Provider build tags
-
-Add `import _ "github.com/shibukawa/yuruidb/backends"` to the application and build with a tag such as `go build -tags aws`. Tagged Go files statically import the selected drivers.
-
-| Tag | Registered driver names |
-| --- | --- |
-| None | None |
-| `aws` | `s3`, `dynamodb` |
-| `gcp` | `gcs`, `firestore`, `firebase` |
-| `cloudflare` | `r2`, `d1`, `cfkv` |
-| Individual tags | `s3`, `dynamodb`, `gcs`, `firestore`, `firebase`, `r2`, `d1`, `cfkv`, `bbolt`, `sql`, `memory` |
-
-The `firebase` tag imports both Firestore and Realtime Database. The driver name `firebase` refers to Realtime Database; the `firestore` tag selects Firestore alone. Tags can be combined without duplicate registration.
-
-```sh
-go run -tags aws ./examples/drivers
-go run -tags 'gcs,r2' ./examples/drivers
-```
-
-The shared `yuruidb.Config` map lets tagged applications configure a driver without importing its package just to reference its configuration type. For example, an AWS application can pass:
+A conditional mutation may commit even if its response is lost. The record layer attempts a readback when context and consistency permit. If it finds the attempted nonce, it returns success. Otherwise, `errors.Is(err, yuruidb.ErrOutcomeUnknown)` remains true and `errors.As` exposes `*yuruidb.MutationError` with the operation, collection, ID, nonce, expected revision, and attempted revision.
 
 ```go
-store, err := yuruidb.Open[Note](ctx, "s3", yuruidb.Config{
-    "Bucket": "my-bucket",
-    "Collection": "notes",
-    "Region": "ap-northeast-1",
-})
+var attempt *yuruidb.MutationError
+if errors.As(err, &attempt) {
+    current, readErr := store.Get[Waiting](recoveryCtx, attempt.ID)
+    if readErr == nil && attempt.MatchesRevision(current.Revision()) {
+        // This exact attempted write is currently stored.
+    }
+}
 ```
 
-Lambda is an intended execution environment. The `lambda` tag alone selects no storage backend; `-tags 'lambda,s3'` includes only S3. The application supplies its Lambda handler and runtime.
+A mismatch does not prove failure: another writer may already have superseded it. On eventually consistent KV, a matching read confirms visibility of that version, not global current state. Absence after physical deletion confirms the desired state, not which deletion committed. If the original context expired, reconcile with an explicit new context.
 
-## Backends
+## Backends and authentication
 
-| Driver | Main configuration fields | Conditional CRUD |
+| Driver | Main connection settings | Conditional record mutations |
 | --- | --- | --- |
-| `memory` | `Collection` | Supported within one process |
-| `bbolt` | `Path`, `Collection`, `Timeout` | Supported for a local file |
-| `sql` | `DB`, `Dialect`, `Collection`, `AutoMigrate` | SQLite and PostgreSQL dialects implemented |
-| `s3` | `Bucket`, `Region`, `Collection` | Conditional PUT; general purpose buckets |
-| `dynamodb` | `Table`, `Region`, `Collection` | Conditional PutItem |
-| `gcs` | `Bucket`, `Collection`, `Token` | Generation preconditions |
-| `firestore` | `Project`, `Database`, `Collection`, `Token` | updateTime preconditions |
-| `firebase` | `Endpoint`, `Collection`, `Token` | Realtime Database conditional PUT with ETags |
-| `r2` | `Endpoint`, `Bucket`, `Collection`, `Credentials` | S3-compatible conditional PUT |
-| `d1` | `AccountID`, `DatabaseID`, `Collection`, `Token`, `AutoMigrate` | SQL guarded by revision conditions |
-| `cfkv` | `AccountID`, `NamespaceID`, `Collection`, `Token` | Reads, listing, and explicit unconditional mutations only |
+| `memory` | none | in-process |
+| `bbolt` | `Path`, `Timeout` | local file transactions |
+| `sql` | `DB`, `Dialect`, `AutoMigrate`, `CloseDB` | SQLite/PostgreSQL SQL dialects |
+| `s3` | `Bucket`, `Region`, optional `Endpoint`, `AddressStyle` | ETag conditions |
+| `dynamodb` | `Table`, `Region` | conditional PutItem/DeleteItem |
+| `gcs` | `Bucket`, `Token` | generation conditions |
+| `firestore` | `Project`, `Database`, `Token` | updateTime conditions |
+| `firebase` | `Endpoint`, `Token` | ETag conditions, including deletion |
+| `r2` | `Endpoint`, `Bucket`, `Credentials` | verified S3 conditions |
+| `d1` | `AccountID`, `DatabaseID`, `Token`, `AutoMigrate` | conditional SQL |
+| `cfkv` | `AccountID`, `NamespaceID`, `Token` | unsupported; explicit unconditional Set/Remove only |
 
-HTTP drivers also accept injected `Client`, `Authorize`, and `Endpoint` values. Schema setup, authentication, limitations, and verification scope are described in the [implementation guide (Japanese)](docs/implementation.ja.md).
+Connection configs omit `Collection` for the typed Store; `OpenRaw` can still select one collection. HTTP clients and authorizers are injectable. AWS's default credential provider checks environment credentials, web identity/STS (EKS IRSA), container credentials (ECS/EKS Pod Identity), then EC2 IMDSv2, caching and refreshing temporary credentials. Profiles and SSO remain caller-injected. Region order is explicit config, `AWS_REGION`, `AWS_DEFAULT_REGION`, then `us-east-1`; R2 defaults to `auto`.
 
-## Storage contract
+AWS S3 uses virtual hosting by default for suitable bucket names; dotted names use path style for TLS compatibility. `AddressStyle` can be `auto`, `virtual`, or `path`. Custom endpoints default to path style. Opening a custom S3/R2 endpoint creates temporary probe keys, verifies conditional creation/replacement, concurrent CAS, and conditional deletion, then cleans up. IAM must allow these probe operations. Ignored PUT conditions fail `Open`; unsupported/ignored DELETE conditions select tombstones. Set `VerifyConditions: true` to probe AWS endpoints as well. `s3.Verify`/`r2.Verify` expose a diagnostic report. Probes are bounded observations, not a proof of every service guarantee.
 
-- Values are JSON data of type `T`. `Insert` / `Get` / `Update` return `Record[T]`; `List` returns `Page[T]`. Read metadata with `record.ID()` and `record.Revision()`; only `Data` is an editable field. Updates return a new record and revision. IDs are canonical lowercase UUIDv7 strings, allocated before `Insert`. Updates preserve the ID.
-- Listing follows ascending ID order. The default limit is 100; supported limits are 1–1000. Continue until the returned `Cursor` is empty.
-- UUIDv7 IDs do not establish exact generation or commit order across independent processes. Pagination does not provide a snapshot across pages.
-- `Update` and `Delete` require the retrieved `Revision`. A stale revision returns `ErrConflict`; the library does not retry with a newer revision automatically.
-- `Delete` writes a revision-bearing tombstone. A deleted ID can be recreated, and its earlier revisions remain invalid. Physical garbage collection is not implemented.
-- `ErrOutcomeUnknown` on a remote mutation means the write may have committed. Read the same ID to reconcile the result.
-- The CF KV driver's `Insert`, `Update`, and `Delete` return `ErrUnsupported`. The typed store exposes explicit, unconditional `Set(ctx, id, data)` and `Remove(ctx, id)` operations for KV. Other drivers return `ErrUnsupported` for these methods.
+Transient HTTP 429/500/502/503/504 responses receive bounded backoff with jitter and fresh authorization. Only conditional mutations are replayed, with unchanged body and condition. Unconditional KV writes and D1 mutations are not blindly retried. `Retry-After` is respected; long minimum delays return the error. JSON responses are limited to 32 MiB; provider limits and encoding overhead can be smaller. Oversized S3/GCS record writes are rejected before upload.
 
-## Extension and verification
+## Streaming documents
 
-Custom drivers implement the byte-oriented `yuruidb.RawStore` and register a non-generic factory through `yuruidb.Register`. The common `Store[T]` handles JSON independently of the backend. For atomic KVS backends, the public [adapter package](adapter/adapter.go) provides `New[T]` and `NewRaw`, reusing the shared revision, tombstone, and cursor handling.
+`s3.OpenBlobs`, `r2.OpenBlobs`, and `gcs.OpenBlobs` open a separate, explicitly named collection for immutable documents. `Insert(ctx, id, io.Reader)` spools input to a temporary file for bounded-memory signing/replay; `Open(ctx, id)` returns a streaming reader the caller must close. The JSON response limit does not apply. Store the returned ID/version reference in a small typed record. Use fresh IDs; native blob ETags can repeat for identical bytes, unlike random record revisions. Conditional blob `Delete` requires its returned version and backend support. Document and record operations do not form a transaction.
 
-`OpenRaw` (both in yuruidb and in each driver) exposes the low-level byte contract; `Wrap[T]` adds JSON typing to an existing raw store. Existing raw payloads must contain JSON compatible with `T` before they can be read through the typed API. The backend envelope format is unchanged.
+```go
+blobs, err := s3.OpenBlobs(ctx, s3.Config{Bucket: "spool", Collection: "documents"})
+meta, err := blobs.Insert(ctx, documentID, sourceReader)
+reader, err := blobs.Open(ctx, meta.ID)
+defer reader.Close()
+```
+
+## Static imports and build tags
+
+Import chosen drivers directly, or import `_ "github.com/shibukawa/yuruidb/backends"` with profiles:
+
+| Tags | Drivers |
+| --- | --- |
+| `aws` | s3, dynamodb |
+| `gcp` | gcs, firestore, firebase |
+| `cloudflare` | r2, d1, cfkv |
+| individual driver names | the selected drivers |
+
+`firebase` also imports Firestore. Tags combine without duplicate registration. `lambda` alone selects no backend. `go run -tags aws ./examples/drivers` prints included drivers. Tags select imports, not runtime credentials or endpoints.
+
+## Extensions and testing
+
+[adapter.New](adapter/adapter.go) wraps an atomic backend with record semantics; call `Bind[T](config.Collection)` before use. Optional `ItemWriter`, `Scanner`, `Deleter`, and `CollectionTransport` interfaces enable native tokens, value listing, physical deletion, and shared collection views. `OpenRaw` and `Wrap(raw)` retain the byte-oriented extension boundary.
+
+Firebase hex-encodes physical IDs with a nonnumeric prefix to support names and byte ordering. SQL cursors/revisions cannot distinguish different injected databases unless a distinct `Identity` is supplied.
 
 ```sh
 go test -race ./...
 go vet ./...
+(cd integration && go test -race ./...)
 python3 scripts/check-builds.py
 ```
 
-bbolt and SQLite are tested against real local databases. Cloud drivers are tested against local HTTP protocol fixtures for CRUD, conditional writes, and pagination. The S3 path also has a separate-process contention test. AWS signatures are checked against published reference vectors. Live cloud services, real PostgreSQL, performance, pricing, and cold-start behavior remain unverified.
-
-The [requirements (Japanese)](docs/requirements.ja.md) record the design basis. Structured requirements and implementation observations are maintained under `.knowledge/concepts/`.
-
-## License
-
-Copyright 2026 yuruidb contributors.
-
-Licensed under the [Apache License 2.0](LICENSE).
+The root module has no cgo requirement. The integration module alone depends on mattn/go-sqlite3. Tests exercise actual bbolt/SQLite and independent HTTP fixtures, including response loss, stale writers after recreation, multi-collection access, 2000-to-10 record deletion, cloud credential flows, compatibility probes, and 34 MiB streaming. Live cloud services, actual PostgreSQL, IAM, and production performance remain unverified. See the [implementation guide](docs/implementation.ja.md) and [validation history](docs/implementation-validation.md).

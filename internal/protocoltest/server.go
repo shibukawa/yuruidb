@@ -140,6 +140,15 @@ func (s *Server) s3(w http.ResponseWriter, r *http.Request) {
 		}
 		w.Header().Set("ETag", `"`+s.items[key].token+`"`)
 		w.WriteHeader(200)
+	case "DELETE":
+		old, exists := s.items[key]
+		expected := strings.Trim(r.Header.Get("If-Match"), `"`)
+		if expected != "" && (!exists || old.token != expected) {
+			w.WriteHeader(412)
+			return
+		}
+		delete(s.items, key)
+		w.WriteHeader(204)
 	default:
 		http.Error(w, "method", 405)
 	}
@@ -167,6 +176,15 @@ func (s *Server) gcs(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		reply(w, map[string]any{"name": key, "generation": s.items[key].token})
+	case r.Method == "DELETE":
+		key := strings.SplitN(r.URL.Path, "/o/", 2)[1]
+		old, exists := s.items[key]
+		if !exists || q.Get("ifGenerationMatch") != old.token {
+			w.WriteHeader(412)
+			return
+		}
+		delete(s.items, key)
+		w.WriteHeader(204)
 	case strings.Contains(r.URL.Path, "/o/"):
 		key := strings.SplitN(r.URL.Path, "/o/", 2)[1]
 		v, ok := s.items[key]
@@ -259,6 +277,16 @@ func (s *Server) dynamo(w http.ResponseWriter, r *http.Request) {
 		}
 		s.items[key] = item{b, in.Item["token"].S}
 		reply(w, map[string]any{})
+	case "DeleteItem":
+		key := in.Key["pk"].S + "|" + in.Key["sk"].S
+		old, exists := s.items[key]
+		if in.Condition != "#token = :expected" || !exists || old.token != in.Values[":expected"].S {
+			w.WriteHeader(400)
+			reply(w, map[string]any{"__type": "ConditionalCheckFailedException"})
+			return
+		}
+		delete(s.items, key)
+		reply(w, map[string]any{})
 	case "Query":
 		if !in.Consistent || !in.Forward {
 			s.t.Error("DynamoDB query guarantees")
@@ -271,7 +299,7 @@ func (s *Server) dynamo(w http.ResponseWriter, r *http.Request) {
 		keys, more := s.keys(prefix, prefix+after, in.Limit, false)
 		items := []map[string]attr{}
 		for _, k := range keys {
-			items = append(items, map[string]attr{"sk": {S: strings.TrimPrefix(k, prefix)}})
+			items = append(items, map[string]attr{"sk": {S: strings.TrimPrefix(k, prefix)}, "payload": {B: base64.StdEncoding.EncodeToString(s.items[k].data)}, "token": {S: s.items[k].token}})
 		}
 		out := map[string]any{"Items": items}
 		if more {
@@ -315,7 +343,7 @@ func (s *Server) firestore(w http.ResponseWriter, r *http.Request) {
 		keys, _ := s.keys(in.Query.From[0].Collection+"/", after, in.Query.Limit, false)
 		out := []map[string]any{}
 		for _, k := range keys {
-			out = append(out, map[string]any{"document": map[string]any{"name": parent + "/" + k}})
+			out = append(out, map[string]any{"document": map[string]any{"name": parent + "/" + k, "fields": map[string]any{"payload": map[string]any{"bytesValue": base64.StdEncoding.EncodeToString(s.items[k].data)}}, "updateTime": s.items[k].token}})
 		}
 		reply(w, out)
 		return
@@ -350,6 +378,15 @@ func (s *Server) firestore(w http.ResponseWriter, r *http.Request) {
 		s.seq++
 		s.items[key] = item{b, fmt.Sprintf("2026-10-20T00:00:00.%09dZ", s.seq)}
 		reply(w, map[string]any{"updateTime": s.items[key].token})
+	case "DELETE":
+		old, exists := s.items[key]
+		if !exists || r.URL.Query().Get("currentDocument.updateTime") != old.token {
+			w.WriteHeader(400)
+			reply(w, map[string]any{"error": map[string]any{"status": "FAILED_PRECONDITION"}})
+			return
+		}
+		delete(s.items, key)
+		reply(w, map[string]any{})
 	default:
 		http.Error(w, "method", 405)
 	}
@@ -401,7 +438,17 @@ func (s *Server) firebase(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(412)
 			return
 		}
+		w.Header().Set("ETag", `"`+s.items[key].token+`"`)
 		w.Write(b)
+	case "DELETE":
+		old, exists := s.items[key]
+		expected := strings.Trim(r.Header.Get("If-Match"), `"`)
+		if !exists || expected == "" || expected != old.token {
+			w.WriteHeader(412)
+			return
+		}
+		delete(s.items, key)
+		w.Write([]byte("null"))
 	default:
 		http.Error(w, "method", 405)
 	}

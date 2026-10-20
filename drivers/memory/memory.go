@@ -1,4 +1,4 @@
-// Package memory registers the in-process "memory" driver.
+// Package memory registers the in-process memory driver.
 package memory
 
 import (
@@ -6,14 +6,19 @@ import (
 	"github.com/shibukawa/yuruidb"
 	"github.com/shibukawa/yuruidb/internal/recordstore"
 	"sort"
+	"strings"
 	"sync"
 )
 
 type Config struct{ Collection string }
-type transport struct {
+type state struct {
 	sync.RWMutex
 	data   map[string]recordstore.Item
 	closed bool
+}
+type transport struct {
+	*state
+	prefix string
 }
 
 func init() {
@@ -29,7 +34,14 @@ func OpenRaw(ctx context.Context, c Config) (yuruidb.RawStore, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	return recordstore.New(&transport{data: map[string]recordstore.Item{}}, c.Collection, "memory", yuruidb.Capabilities{ConditionalMutations: true, StrongReads: true})
+	identity, err := yuruidb.NewRevision()
+	if err != nil {
+		return nil, err
+	}
+	return recordstore.New(&transport{state: &state{data: make(map[string]recordstore.Item)}, prefix: c.Collection + "/"}, c.Collection, "memory:"+identity, yuruidb.Capabilities{ConditionalMutations: true, StrongReads: true})
+}
+func (t *transport) ForCollection(ctx context.Context, name string) (recordstore.Transport, error) {
+	return &transport{state: t.state, prefix: name + "/"}, nil
 }
 func (t *transport) Read(ctx context.Context, k string) (recordstore.Item, error) {
 	if err := ctx.Err(); err != nil {
@@ -48,6 +60,30 @@ func (t *transport) Read(ctx context.Context, k string) (recordstore.Item, error
 	return i, nil
 }
 func (t *transport) Write(ctx context.Context, k string, b []byte, expected string) error {
+	_, err := t.WriteItem(ctx, k, b, expected)
+	return err
+}
+func (t *transport) WriteItem(ctx context.Context, k string, b []byte, expected string) (string, error) {
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+	t.Lock()
+	defer t.Unlock()
+	if t.closed {
+		return "", yuruidb.ErrClosed
+	}
+	old, ok := t.data[k]
+	if ok && old.Token != expected || !ok && expected != "" {
+		return "", yuruidb.ErrConflict
+	}
+	token, err := yuruidb.NewRevision()
+	if err != nil {
+		return "", err
+	}
+	t.data[k] = recordstore.Item{Data: append([]byte(nil), b...), Token: token}
+	return token, nil
+}
+func (t *transport) Delete(ctx context.Context, k, expected string) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -57,17 +93,13 @@ func (t *transport) Write(ctx context.Context, k string, b []byte, expected stri
 		return yuruidb.ErrClosed
 	}
 	old, ok := t.data[k]
-	if ok && old.Token != expected || !ok && expected != "" {
+	if !ok || old.Token != expected {
 		return yuruidb.ErrConflict
 	}
-	token, err := yuruidb.NewRevision()
-	if err != nil {
-		return err
-	}
-	t.data[k] = recordstore.Item{Data: append([]byte(nil), b...), Token: token}
+	delete(t.data, k)
 	return nil
 }
-func (t *transport) Keys(ctx context.Context, after string, n int) ([]string, bool, error) {
+func (t *transport) Scan(ctx context.Context, after string, n int) ([]recordstore.Entry, bool, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, false, err
 	}
@@ -78,7 +110,7 @@ func (t *transport) Keys(ctx context.Context, after string, n int) ([]string, bo
 	}
 	keys := []string{}
 	for k := range t.data {
-		if k > after {
+		if strings.HasPrefix(k, t.prefix) && k > after {
 			keys = append(keys, k)
 		}
 	}
@@ -87,15 +119,27 @@ func (t *transport) Keys(ctx context.Context, after string, n int) ([]string, bo
 	if more {
 		keys = keys[:n]
 	}
-	return keys, more, nil
+	out := make([]recordstore.Entry, len(keys))
+	for i, k := range keys {
+		v := t.data[k]
+		v.Data = append([]byte(nil), v.Data...)
+		out[i] = recordstore.Entry{Key: k, Item: v}
+	}
+	return out, more, nil
+}
+func (t *transport) Keys(ctx context.Context, after string, n int) ([]string, bool, error) {
+	entries, more, err := t.Scan(ctx, after, n)
+	keys := make([]string, len(entries))
+	for i, e := range entries {
+		keys[i] = e.Key
+	}
+	return keys, more, err
 }
 func (t *transport) Close() error { t.Lock(); defer t.Unlock(); t.closed = true; return nil }
-
-// Open opens a JSON-typed collection using this driver.
-func Open[T any](ctx context.Context, c Config) (*yuruidb.Store[T], error) {
+func Open(ctx context.Context, c Config) (*yuruidb.Store, error) {
 	raw, err := OpenRaw(ctx, c)
 	if err != nil {
 		return nil, err
 	}
-	return yuruidb.Wrap[T](raw), nil
+	return yuruidb.Wrap(raw), nil
 }

@@ -17,7 +17,7 @@ assertions:
   authority: authored
   basis:
   - path: docs/requirements-input.md
-    input_hash: 401edd4f59abce29df56c883931c4409a65443dabfd87aa8424ae9aa8cc2cd23
+    input_hash: d9795855517cf2f1321c52cd5e78792aeaf8a5393a028050011a8e07071ee115
   evidence:
     input_path: docs/requirements-input.md
 - key: optimistic
@@ -26,7 +26,7 @@ assertions:
   authority: authored
   basis:
   - path: docs/requirements-input.md
-    input_hash: 401edd4f59abce29df56c883931c4409a65443dabfd87aa8424ae9aa8cc2cd23
+    input_hash: d9795855517cf2f1321c52cd5e78792aeaf8a5393a028050011a8e07071ee115
   evidence:
     input_path: docs/requirements-input.md
 facts:
@@ -40,10 +40,11 @@ facts:
   bbolt_boundary: bbolt serves local persistence, not shared remote multi-process access.
   implemented_mutations: Expected revisions are mandatory for update/delete; atomic backend conditions guard final
     writes; new revisions prevent ABA.
-  implemented_deletion: All strict adapters retain revision-bearing tombstones and allow conditional recreation;
-    physical GC is not implemented.
-  implemented_retry: No automatic retries; ambiguous HTTP mutations and database/sql execution failures return ErrOutcomeUnknown
-    conservatively.
+  implemented_deletion: Native conditional physical deletion on capable backends; otherwise CAS tombstones; PurgeTombstones
+    deletes old tombstones with native-token conditions.
+  implemented_retry: Bounded retries of transient HTTP responses preserve body and condition, reauthorize each attempt,
+    and retain unknown outcome after ambiguous conflicts. MutationError retains the attempted nonce and supports
+    reconciliation.
 acceptance:
   concurrent-mutation:
     text: On a driver advertising safe conditional mutations, concurrent writes using one expected revision cannot
@@ -62,31 +63,31 @@ verification:
     authority: observed
     basis:
     - path: store.go
-      input_hash: 6a2f8325336ed512d02d3f1032200ce17e13d19cba32f31622f33457c46e95be
+      input_hash: 67c6715d4c2d21c1cac5b2312b4dafc87b25916cc0f9727af6114c0b95292e0b
     - path: id.go
-      input_hash: 706422e1415b75d85b8a153aa765d3ee673a92d8c8b161beee93d2affd668854
+      input_hash: c6eaccd33f2aab2065c909687d81770f88b189063b68b0cb6575e116f0e00c7e
     - path: config.go
       input_hash: 12b72dfea7406b6f32bfce97a89ab1e80675f308f2dd1c34204c297074e501fa
     - path: internal/recordstore/store.go
-      input_hash: ab76d1226e9024b29273fca59fbd3d445da9f23c34ce978d0123c88e9c153fb0
+      input_hash: 4eba497728ad538a70a7239f7412b001a083e06c2752cde8a1c1d75bef459a65
     - path: internal/conformance/conformance.go
-      input_hash: 6a8a6310e325545cee6703bdacde8725ce6a04486572083196c29d0683cd08ba
+      input_hash: 0e68dfbe3e4c9e2fced6b5dac556e1f896aa96c38aa4ee0ac7ca6a81824434a1
     - path: docs/implementation-validation.md
-      input_hash: da702ead96402b1bc0dd9ddfba64aa1b2c7aee00df09d82033d08b9063739edf
+      input_hash: 56d9658830444f2cdd7923b3f5bb63ac534ec2a4bf2d2d7fd72e3778f753eb05
     - path: drivers/s3/s3_test.go
       input_hash: cf605feb388a516b1788ea8f00db3ad3aedc32221e01cc2302d9e16d7dca5aa7
     - path: internal/protocoltest/server.go
-      input_hash: 4844fc7af8b052001645f3e64f00e0516f2c04b0573777df24f1008dfd40cf01
+      input_hash: c34431b30320dada5f640909a7b3872b93bf59f3e98c3f5a74cd7e7ebc9bfa33
     - path: raw.go
-      input_hash: 924f3f0aaab3b6aed88fececc7c35d8928cc57d69ce8605a5221f683ca702ced
+      input_hash: b2b8a6aa37daad55d8e8c452764bfd4497a3b1219a8da2403bdfed8630c9c023
     - path: store_test.go
-      input_hash: 6b85d86b0a9101cffe03e885416898efaad1f212dcbe4655f50e6e29e5482bad
+      input_hash: e197ae084b89d56ebb5ff1f94e6bfbf0d8c2b5e13cc5b546a01c6582c945ad6b
     - path: go.mod
-      input_hash: dcf571aed9e1685ae6a1de15e63471fb88b9f38e88e0083874caf4dc808767e3
+      input_hash: e44147fdb31655b4b1f85a3e3f469753946b6112bd0236946c3f66c233edb88c
     - path: record.go
       input_hash: 720514acfcf76c8e0df7cb75a5e5524871275f00c2015a2b96ca87c2917f0b9d
     - path: record_test.go
-      input_hash: fa0dcbbfae969bba7c215582ef7014b0c8d73237866b540696fbdc434909af7e
+      input_hash: 2ddb19c8f1d00354c40e0522da0099242b2b968d55cc8f1bf6b1ef9e07921e13
     evidence:
       input_path: docs/implementation-validation.md
     scope:
@@ -104,14 +105,14 @@ open_questions:
     resolution: Implemented mandatory expected revisions. Revisit only on explicit API feedback.
   delete-aba:
     text: Choose conditional deletion, tombstones, and ID-reuse rules per backend.
-    state: deferred
-    resolution: Implemented tombstones plus fresh random revisions on every mutation and recreation. Revisit GC
-      before introducing physical reclamation.
+    state: answered
+    resolution: Random record nonce and incarnation-specific native CAS token prevent stale writes/deletes after
+      physical deletion and recreation. Unsupported deletion conditions fall back to tombstones.
   idempotency:
     text: How are retries and unknown write outcomes exposed?
-    state: deferred
-    resolution: Implemented caller-assigned IDs, no automatic retries, and explicit unknown-outcome errors. Exactly-once
-      execution is not claimed.
+    state: answered
+    resolution: Conditional HTTP replay plus nonce readback; unresolved outcomes preserve MutationError. Superseding
+      writes or physical absence do not prove which historic mutation committed. Exactly-once history is not promised.
 relations:
 - relation: constrained_by
   to: constraint:cloudflare-kv

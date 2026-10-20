@@ -49,7 +49,7 @@ func OpenRaw(ctx context.Context, c Config) (yuruidb.RawStore, error) {
 		return nil, fmt.Errorf("%w: DynamoDB table required", yuruidb.ErrInvalid)
 	}
 	if c.Region == "" {
-		c.Region = "us-east-1"
+		c.Region = awsauth.Region("")
 	}
 	if c.Endpoint == "" {
 		c.Endpoint = "https://dynamodb." + c.Region + ".amazonaws.com"
@@ -77,7 +77,7 @@ func (t *transport) call(ctx context.Context, op string, input, output any, muta
 			Type string `json:"__type"`
 		}
 		if json.Unmarshal(r.Body, &remote) == nil && strings.HasSuffix(remote.Type, "ConditionalCheckFailedException") {
-			return yuruidb.ErrConflict
+			return errors.Join(yuruidb.ErrConflict, err)
 		}
 		return err
 	}
@@ -110,9 +110,13 @@ func (t *transport) Read(ctx context.Context, key string) (recordstore.Item, err
 	return recordstore.Item{Data: data, Token: out.Item["token"].S}, nil
 }
 func (t *transport) Write(ctx context.Context, key string, data []byte, expected string) error {
+	_, err := t.WriteItem(ctx, key, data, expected)
+	return err
+}
+func (t *transport) WriteItem(ctx context.Context, key string, data []byte, expected string) (string, error) {
 	token, err := yuruidb.NewRevision()
 	if err != nil {
-		return err
+		return "", err
 	}
 	item := t.key(key)
 	item["payload"] = attribute{B: base64.StdEncoding.EncodeToString(data)}
@@ -123,13 +127,21 @@ func (t *transport) Write(ctx context.Context, key string, data []byte, expected
 		input["ExpressionAttributeNames"] = map[string]string{"#token": "token"}
 		input["ExpressionAttributeValues"] = map[string]attribute{":expected": {S: expected}}
 	}
-	return t.call(ctx, "PutItem", input, nil, true)
+	return token, t.call(ctx, "PutItem", input, nil, true)
 }
 func (t *transport) Keys(ctx context.Context, after string, n int) ([]string, bool, error) {
+	entries, more, err := t.Scan(ctx, after, n)
+	keys := make([]string, len(entries))
+	for i, e := range entries {
+		keys[i] = e.Key
+	}
+	return keys, more, err
+}
+func (t *transport) Scan(ctx context.Context, after string, n int) ([]recordstore.Entry, bool, error) {
 	if after == "" {
 		after = t.collection + "/"
 	}
-	input := map[string]any{"TableName": t.table, "KeyConditionExpression": "#pk = :collection AND #sk > :after", "ExpressionAttributeNames": map[string]string{"#pk": "pk", "#sk": "sk"}, "ExpressionAttributeValues": map[string]attribute{":collection": {S: t.collection}, ":after": {S: after}}, "ConsistentRead": true, "ScanIndexForward": true, "Limit": n, "ProjectionExpression": "#sk"}
+	input := map[string]any{"TableName": t.table, "KeyConditionExpression": "#pk = :collection AND #sk > :after", "ExpressionAttributeNames": map[string]string{"#pk": "pk", "#sk": "sk", "#token": "token"}, "ExpressionAttributeValues": map[string]attribute{":collection": {S: t.collection}, ":after": {S: after}}, "ConsistentRead": true, "ScanIndexForward": true, "Limit": n, "ProjectionExpression": "#sk, payload, #token"}
 	var out struct {
 		Items []map[string]attribute `json:"Items"`
 		Last  map[string]attribute   `json:"LastEvaluatedKey"`
@@ -137,19 +149,33 @@ func (t *transport) Keys(ctx context.Context, after string, n int) ([]string, bo
 	if err := t.call(ctx, "Query", input, &out, false); err != nil {
 		return nil, false, err
 	}
-	keys := make([]string, len(out.Items))
-	for i, item := range out.Items {
-		keys[i] = item["sk"].S
+	entries := make([]recordstore.Entry, 0, len(out.Items))
+	for _, item := range out.Items {
+		b, err := base64.StdEncoding.DecodeString(item["payload"].B)
+		if err != nil {
+			return nil, false, err
+		}
+		entries = append(entries, recordstore.Entry{Key: item["sk"].S, Item: recordstore.Item{Data: b, Token: item["token"].S}})
 	}
-	return keys, len(out.Last) > 0, nil
+	return entries, len(out.Last) > 0, nil
 }
 func (t *transport) Close() error { return nil }
 
-// Open opens a JSON-typed collection using this driver.
-func Open[T any](ctx context.Context, c Config) (*yuruidb.Store[T], error) {
+// Open opens a connection. Bind data types to collection names before use.
+func Open(ctx context.Context, c Config) (*yuruidb.Store, error) {
 	raw, err := OpenRaw(ctx, c)
 	if err != nil {
 		return nil, err
 	}
-	return yuruidb.Wrap[T](raw), nil
+	return yuruidb.Wrap(raw), nil
+}
+
+func (t *transport) ForCollection(ctx context.Context, name string) (recordstore.Transport, error) {
+	copy := *t
+	copy.collection = name
+	return &copy, nil
+}
+
+func (t *transport) Delete(ctx context.Context, key, expected string) error {
+	return t.call(ctx, "DeleteItem", map[string]any{"TableName": t.table, "Key": t.key(key), "ConditionExpression": "#token = :expected", "ExpressionAttributeNames": map[string]string{"#token": "token"}, "ExpressionAttributeValues": map[string]attribute{":expected": {S: expected}}}, nil, true)
 }

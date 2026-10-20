@@ -1,18 +1,20 @@
-// Package bbolt registers the local-file "bbolt" driver. It is not a shared
-// remote backend for multiple Lambda processes.
+// Package bbolt registers the local-file bbolt driver.
 package bbolt
 
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+	"sync"
+	"time"
+
 	"github.com/shibukawa/yuruidb"
 	"github.com/shibukawa/yuruidb/internal/recordstore"
 	bolt "go.etcd.io/bbolt"
-	"os"
-	"time"
 )
 
 type Config struct {
@@ -20,9 +22,22 @@ type Config struct {
 	Mode             os.FileMode
 	Timeout          time.Duration
 }
+type connection struct {
+	db      *bolt.DB
+	refs    int
+	mode    os.FileMode
+	timeout time.Duration
+}
+
+var connections = struct {
+	sync.Mutex
+	files map[string]*connection
+}{files: make(map[string]*connection)}
+
 type transport struct {
 	db     *bolt.DB
 	bucket []byte
+	path   string
 }
 
 func init() {
@@ -34,15 +49,37 @@ func init() {
 		return OpenRaw(ctx, c)
 	})
 }
+func canonicalPath(path string) (string, error) {
+	p, err := filepath.Abs(path)
+	if err != nil {
+		return "", err
+	}
+	if resolved, err := filepath.EvalSymlinks(p); err == nil {
+		return resolved, nil
+	} else if !os.IsNotExist(err) {
+		return "", err
+	}
+	parent, err := filepath.EvalSymlinks(filepath.Dir(p))
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(parent, filepath.Base(p)), nil
+}
 func OpenRaw(ctx context.Context, c Config) (yuruidb.RawStore, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	if err := yuruidb.ValidateCollection(c.Collection); err != nil {
-		return nil, err
+	if c.Collection != "" {
+		if err := yuruidb.ValidateCollection(c.Collection); err != nil {
+			return nil, err
+		}
 	}
 	if c.Path == "" {
 		return nil, fmt.Errorf("%w: bbolt path required", yuruidb.ErrInvalid)
+	}
+	path, err := canonicalPath(c.Path)
+	if err != nil {
+		return nil, err
 	}
 	mode := c.Mode
 	if mode == 0 {
@@ -52,48 +89,99 @@ func OpenRaw(ctx context.Context, c Config) (yuruidb.RawStore, error) {
 	if timeout == 0 {
 		timeout = time.Second
 	}
-	db, err := bolt.Open(c.Path, mode, &bolt.Options{Timeout: timeout})
-	if err != nil {
-		return nil, err
+	connections.Lock()
+	conn := connections.files[path]
+	if conn != nil {
+		if conn.mode != mode || conn.timeout != timeout {
+			connections.Unlock()
+			return nil, fmt.Errorf("%w: conflicting bbolt open options", yuruidb.ErrInvalid)
+		}
+		conn.refs++
+	} else {
+		db, err := bolt.Open(path, mode, &bolt.Options{Timeout: timeout})
+		if err != nil {
+			connections.Unlock()
+			return nil, err
+		}
+		conn = &connection{db: db, refs: 1, mode: mode, timeout: timeout}
+		connections.files[path] = conn
 	}
-	t := &transport{db: db, bucket: []byte(c.Collection)}
-	if err = db.Update(func(tx *bolt.Tx) error { _, err := tx.CreateBucketIfNotExists(t.bucket); return err }); err != nil {
-		db.Close()
-		return nil, err
+	connections.Unlock()
+	t := &transport{db: conn.db, path: path}
+	if c.Collection != "" {
+		t.bucket = []byte(c.Collection)
+		if err = t.ensureBucket(ctx); err != nil {
+			t.Close()
+			return nil, err
+		}
 	}
-	s, err := recordstore.New(t, c.Collection, "bbolt:"+c.Path, yuruidb.Capabilities{ConditionalMutations: true, StrongReads: true})
+	s, err := recordstore.New(t, c.Collection, "bbolt:"+path, yuruidb.Capabilities{ConditionalMutations: true, StrongReads: true})
 	if err != nil {
-		db.Close()
+		t.Close()
 	}
 	return s, err
 }
-func (t *transport) Read(ctx context.Context, k string) (recordstore.Item, error) {
-	var i recordstore.Item
-	if err := ctx.Err(); err != nil {
-		return i, err
-	}
-	err := t.db.View(func(tx *bolt.Tx) error {
-		v := tx.Bucket(t.bucket).Get([]byte(k))
-		if v == nil {
-			return yuruidb.ErrNotFound
-		}
-		return json.Unmarshal(v, &i)
-	})
-	return i, mapError(err)
-}
-func (t *transport) Write(ctx context.Context, k string, b []byte, expected string) error {
-	if err := ctx.Err(); err != nil {
-		return err
-	}
+func (t *transport) ensureBucket(ctx context.Context) error {
 	return mapError(t.db.Update(func(tx *bolt.Tx) error {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
+		_, err := tx.CreateBucketIfNotExists(t.bucket)
+		return err
+	}))
+}
+func (t *transport) ForCollection(ctx context.Context, name string) (recordstore.Transport, error) {
+	copy := *t
+	copy.bucket = []byte(name)
+	if err := copy.ensureBucket(ctx); err != nil {
+		return nil, err
+	}
+	return &copy, nil
+}
+func decodeItem(data []byte, key string) (recordstore.Item, error) {
+	if !bytes.HasPrefix(data, []byte("YRE1")) {
+		return recordstore.Item{}, fmt.Errorf("yuruidb: corrupt bbolt envelope")
+	}
+	e, err := recordstore.Decode(data, strings.SplitN(key, "/", 2)[1])
+	return recordstore.Item{Data: append([]byte(nil), data...), Token: e.Revision}, err
+}
+func (t *transport) Read(ctx context.Context, key string) (recordstore.Item, error) {
+	if err := ctx.Err(); err != nil {
+		return recordstore.Item{}, err
+	}
+	var item recordstore.Item
+	err := t.db.View(func(tx *bolt.Tx) error {
+		v := tx.Bucket(t.bucket).Get([]byte(key))
+		if v == nil {
+			return yuruidb.ErrNotFound
+		}
+		var err error
+		item, err = decodeItem(v, key)
+		return err
+	})
+	return item, mapError(err)
+}
+func (t *transport) Write(ctx context.Context, key string, data []byte, expected string) error {
+	_, err := t.WriteItem(ctx, key, data, expected)
+	return err
+}
+func (t *transport) WriteItem(ctx context.Context, key string, data []byte, expected string) (string, error) {
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+	e, err := recordstore.Decode(data, strings.SplitN(key, "/", 2)[1])
+	if err != nil {
+		return "", err
+	}
+	err = t.db.Update(func(tx *bolt.Tx) error {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		bucket := tx.Bucket(t.bucket)
-		v := bucket.Get([]byte(k))
-		var old recordstore.Item
+		v := bucket.Get([]byte(key))
 		if v != nil {
-			if err := json.Unmarshal(v, &old); err != nil {
+			old, err := decodeItem(v, key)
+			if err != nil {
 				return err
 			}
 			if old.Token != expected {
@@ -102,52 +190,91 @@ func (t *transport) Write(ctx context.Context, k string, b []byte, expected stri
 		} else if expected != "" {
 			return yuruidb.ErrConflict
 		}
-		token, err := yuruidb.NewRevision()
+		return bucket.Put([]byte(key), recordstore.BinaryEnvelope(e))
+	})
+	return e.Revision, mapError(err)
+}
+func (t *transport) Delete(ctx context.Context, key, expected string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	return mapError(t.db.Update(func(tx *bolt.Tx) error {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		bucket := tx.Bucket(t.bucket)
+		v := bucket.Get([]byte(key))
+		if v == nil {
+			return yuruidb.ErrConflict
+		}
+		old, err := decodeItem(v, key)
 		if err != nil {
 			return err
 		}
-		data, err := json.Marshal(recordstore.Item{Data: b, Token: token})
-		if err != nil {
-			return err
+		if old.Token != expected {
+			return yuruidb.ErrConflict
 		}
-		return bucket.Put([]byte(k), data)
+		return bucket.Delete([]byte(key))
 	}))
 }
-func (t *transport) Keys(ctx context.Context, after string, n int) ([]string, bool, error) {
-	keys := []string{}
+func (t *transport) Scan(ctx context.Context, after string, n int) ([]recordstore.Entry, bool, error) {
+	entries := []recordstore.Entry{}
 	err := t.db.View(func(tx *bolt.Tx) error {
 		c := tx.Bucket(t.bucket).Cursor()
-		k, _ := c.Seek([]byte(after))
+		k, v := c.Seek([]byte(after))
 		if bytes.Equal(k, []byte(after)) {
-			k, _ = c.Next()
+			k, v = c.Next()
 		}
-		for ; k != nil && len(keys) <= n; k, _ = c.Next() {
+		for ; k != nil && len(entries) <= n; k, v = c.Next() {
 			if err := ctx.Err(); err != nil {
 				return err
 			}
-			keys = append(keys, string(k))
+			item, err := decodeItem(v, string(k))
+			if err != nil {
+				return err
+			}
+			entries = append(entries, recordstore.Entry{Key: string(k), Item: item})
 		}
 		return nil
 	})
-	more := len(keys) > n
+	more := len(entries) > n
 	if more {
-		keys = keys[:n]
+		entries = entries[:n]
 	}
-	return keys, more, mapError(err)
+	return entries, more, mapError(err)
 }
-func (t *transport) Close() error { return mapError(t.db.Close()) }
+func (t *transport) Keys(ctx context.Context, after string, n int) ([]string, bool, error) {
+	entries, more, err := t.Scan(ctx, after, n)
+	keys := make([]string, len(entries))
+	for i, e := range entries {
+		keys[i] = e.Key
+	}
+	return keys, more, err
+}
+func (t *transport) Close() error {
+	connections.Lock()
+	defer connections.Unlock()
+	conn := connections.files[t.path]
+	if conn == nil {
+		return nil
+	}
+	conn.refs--
+	if conn.refs == 0 {
+		delete(connections.files, t.path)
+		return mapError(conn.db.Close())
+	}
+	return nil
+}
 func mapError(err error) error {
 	if errors.Is(err, bolt.ErrDatabaseNotOpen) {
 		return yuruidb.ErrClosed
 	}
 	return err
 }
-
-// Open opens a JSON-typed collection using this driver.
-func Open[T any](ctx context.Context, c Config) (*yuruidb.Store[T], error) {
+func Open(ctx context.Context, c Config) (*yuruidb.Store, error) {
 	raw, err := OpenRaw(ctx, c)
 	if err != nil {
 		return nil, err
 	}
-	return yuruidb.Wrap[T](raw), nil
+	return yuruidb.Wrap(raw), nil
 }

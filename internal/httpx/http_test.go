@@ -54,3 +54,41 @@ func TestStatusAndMalformedMutation(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestRetryKeepsConditionsAndReauthorizes(t *testing.T) {
+	attempts, auths := 0, 0
+	c := Client{Auth: func(r *http.Request) error { auths++; r.Header.Set("Authorization", "test"); return nil }, HTTP: &http.Client{Transport: roundTrip(func(r *http.Request) (*http.Response, error) {
+		attempts++
+		b, _ := io.ReadAll(r.Body)
+		if string(b) != "same-body" || r.Header.Get("If-Match") != "old-token" {
+			t.Error("mutation changed on retry")
+		}
+		status := 503
+		if attempts == 2 {
+			status = 412
+		}
+		return &http.Response{StatusCode: status, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(""))}, nil
+	})}}
+	_, err := c.Do(context.Background(), "PUT", "https://example.invalid/item", []byte("same-body"), http.Header{"If-Match": {"old-token"}}, true)
+	if attempts != 2 || auths != 2 || !errors.Is(err, yuruidb.ErrOutcomeUnknown) || !errors.Is(err, yuruidb.ErrConflict) {
+		t.Fatalf("retry attempts=%d auths=%d err=%v", attempts, auths, err)
+	}
+}
+func TestReadRetryAndUnconditionalMutation(t *testing.T) {
+	attempts := 0
+	c := Client{HTTP: &http.Client{Transport: roundTrip(func(*http.Request) (*http.Response, error) {
+		attempts++
+		status := 503
+		if attempts == 2 {
+			status = 200
+		}
+		return &http.Response{StatusCode: status, Header: make(http.Header), Body: io.NopCloser(strings.NewReader("ok"))}, nil
+	})}}
+	if _, err := c.Do(context.Background(), "GET", "https://example.invalid/item", nil, nil, false); err != nil || attempts != 2 {
+		t.Fatalf("GET retry: %d %v", attempts, err)
+	}
+	attempts = 0
+	if _, err := c.Do(context.Background(), "PUT", "https://example.invalid/item", nil, nil, true); !errors.Is(err, yuruidb.ErrOutcomeUnknown) || attempts != 1 {
+		t.Fatalf("unconditional mutation retried: %d %v", attempts, err)
+	}
+}

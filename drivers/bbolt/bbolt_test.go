@@ -1,11 +1,13 @@
 package bbolt_test
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"github.com/shibukawa/yuruidb"
 	"github.com/shibukawa/yuruidb/drivers/bbolt"
 	"github.com/shibukawa/yuruidb/internal/conformance"
+	bolt "go.etcd.io/bbolt"
 	"path/filepath"
 	"testing"
 )
@@ -67,5 +69,38 @@ func TestPersistenceAndCollections(t *testing.T) {
 	}
 	if p, err := s.List(ctx, yuruidb.ListOptions{}); err != nil || len(p.Records) != 0 {
 		t.Fatalf("collection: %v %v", p, err)
+	}
+}
+
+func TestBinarySize(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "db")
+	id := "document"
+	s, err := bbolt.OpenRaw(ctx, bbolt.Config{Path: path, Collection: "items"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	payload := bytes.Repeat([]byte("x"), 1<<20)
+	if _, err = s.Insert(ctx, id, payload); err != nil {
+		t.Fatal(err)
+	}
+	s.Close()
+	db, err := bolt.Open(path, 0600, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	err = db.View(func(tx *bolt.Tx) error {
+		stored := tx.Bucket([]byte("items")).Get([]byte("items/" + id))
+		if len(stored) > len(payload)+128 {
+			t.Fatalf("encoded bytes=%d payload=%d", len(stored), len(payload))
+		}
+		if !bytes.HasPrefix(stored, []byte("YRE1")) {
+			t.Fatal("value is not binary")
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
 	}
 }

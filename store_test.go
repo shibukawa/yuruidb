@@ -33,8 +33,11 @@ func nextID(t *testing.T) string {
 func TestTypedBboltPersistence(t *testing.T) {
 	ctx := context.Background()
 	config := yuruidb.Config{"Path": filepath.Join(t.TempDir(), "records.db"), "Collection": "notes"}
-	s, err := yuruidb.Open[note](ctx, "bbolt", config)
+	s, err := yuruidb.Open(ctx, "bbolt", config)
 	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Bind[note]("notes"); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { s.Close() })
@@ -52,7 +55,7 @@ func TestTypedBboltPersistence(t *testing.T) {
 		t.Fatal("returned data aliases caller input")
 	}
 	r.Data.Tags[0] = "changed result"
-	got, err := s.Get(ctx, id)
+	got, err := s.Get[note](ctx, id)
 	if err != nil || got.Data.Tags[0] != "go" {
 		t.Fatalf("get: %+v %v", got, err)
 	}
@@ -67,28 +70,31 @@ func TestTypedBboltPersistence(t *testing.T) {
 		t.Fatal(err)
 	}
 	// The direct driver constructor has the same typed API.
-	s, err = bbolt.Open[note](ctx, bbolt.Config{Path: config["Path"].(string), Collection: "notes"})
+	s, err = bbolt.Open(ctx, bbolt.Config{Path: config["Path"].(string), Collection: "notes"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	p, err := s.List(ctx, yuruidb.ListOptions{Limit: 1})
+	if err := s.Bind[note]("notes"); err != nil {
+		t.Fatal(err)
+	}
+	p, err := s.List[note](ctx, yuruidb.ListOptions{Limit: 1})
 	if err != nil || len(p.Records) != 1 || p.Records[0].ID() != id || p.Records[0].Data.Text != "updated" || p.Cursor == "" {
 		t.Fatalf("first page: %+v %v", p, err)
 	}
-	p, err = s.List(ctx, yuruidb.ListOptions{Limit: 1, Cursor: p.Cursor})
+	p, err = s.List[note](ctx, yuruidb.ListOptions{Limit: 1, Cursor: p.Cursor})
 	if err != nil || len(p.Records) != 1 || p.Records[0].ID() != laterID {
 		t.Fatalf("second page: %+v %v", p, err)
 	}
-	if err := s.Delete(ctx, id, updated.Revision()); err != nil {
+	if err := s.Delete[note](ctx, id, updated.Revision()); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.Get(ctx, id); !errors.Is(err, yuruidb.ErrNotFound) {
+	if _, err := s.Get[note](ctx, id); !errors.Is(err, yuruidb.ErrNotFound) {
 		t.Fatalf("deleted: %v", err)
 	}
 	if _, err := s.Set(ctx, id, note{}); !errors.Is(err, yuruidb.ErrUnsupported) {
 		t.Fatalf("set on CAS backend: %v", err)
 	}
-	if err := s.Remove(ctx, id); !errors.Is(err, yuruidb.ErrUnsupported) {
+	if err := s.Remove[note](ctx, id); !errors.Is(err, yuruidb.ErrUnsupported) {
 		t.Fatalf("remove on CAS backend: %v", err)
 	}
 }
@@ -112,31 +118,34 @@ func (v *jsonText) UnmarshalJSON(b []byte) error {
 
 func TestJSONFailuresDoNotMutate(t *testing.T) {
 	ctx := context.Background()
-	s, err := memory.Open[any](ctx, memory.Config{Collection: "notes"})
+	s, err := memory.Open(ctx, memory.Config{Collection: "notes"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer s.Close()
+	if err := s.Bind[any]("notes"); err != nil {
+		t.Fatal(err)
+	}
 	cycle := map[string]any{}
 	cycle["cycle"] = cycle
 	for _, data := range []any{func() {}, make(chan int), math.NaN(), cycle, json.RawMessage(`{`)} {
 		id := nextID(t)
-		if _, err := s.Insert(ctx, id, data); !errors.Is(err, yuruidb.ErrInvalid) {
+		if _, err := s.Insert[any](ctx, id, data); !errors.Is(err, yuruidb.ErrInvalid) {
 			t.Fatalf("insert %T: %v", data, err)
 		}
-		if _, err := s.Get(ctx, id); !errors.Is(err, yuruidb.ErrNotFound) {
+		if _, err := s.Get[any](ctx, id); !errors.Is(err, yuruidb.ErrNotFound) {
 			t.Fatalf("failed insert wrote data: %v", err)
 		}
 	}
 	id := nextID(t)
-	r, err := s.Insert(ctx, id, "original")
+	r, err := s.Insert[any](ctx, id, "original")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.Update(ctx, id, math.Inf(1), r.Revision()); !errors.Is(err, yuruidb.ErrInvalid) {
+	if _, err := s.Update[any](ctx, id, math.Inf(1), r.Revision()); !errors.Is(err, yuruidb.ErrInvalid) {
 		t.Fatal(err)
 	}
-	got, err := s.Get(ctx, id)
+	got, err := s.Get[any](ctx, id)
 	if err != nil || got.Revision() != r.Revision() || got.Data != "original" {
 		t.Fatalf("failed update changed data: %+v %v", got, err)
 	}
@@ -145,7 +154,10 @@ func TestJSONFailuresDoNotMutate(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer raw.Close()
-	writeStore := yuruidb.Wrap[writeOnly](raw)
+	writeStore := yuruidb.Wrap(raw)
+	if err := writeStore.Bind[writeOnly]("notes"); err != nil {
+		t.Fatal(err)
+	}
 	id = nextID(t)
 	if _, err := writeStore.Insert(ctx, id, writeOnly{}); !errors.Is(err, yuruidb.ErrInvalid) {
 		t.Fatalf("incompatible custom marshaler: %v", err)
@@ -155,7 +167,7 @@ func TestJSONFailuresDoNotMutate(t *testing.T) {
 	}
 	canceled, cancel := context.WithCancel(ctx)
 	cancel()
-	if _, err := s.Insert(canceled, nextID(t), func() {}); !errors.Is(err, context.Canceled) {
+	if _, err := s.Insert[any](canceled, nextID(t), func() {}); !errors.Is(err, context.Canceled) {
 		t.Fatalf("canceled insert: %v", err)
 	}
 }
@@ -168,12 +180,15 @@ func checkRoundTrip[T any](t *testing.T, input T) {
 		t.Fatal(err)
 	}
 	defer raw.Close()
-	s := yuruidb.Wrap[T](raw)
-	r, err := s.Insert(ctx, nextID(t), input)
+	s := yuruidb.Wrap(raw)
+	if err := s.Bind[T]("notes"); err != nil {
+		t.Fatal(err)
+	}
+	r, err := s.Insert[T](ctx, nextID(t), input)
 	if err != nil {
 		t.Fatal(err)
 	}
-	got, err := s.Get(ctx, r.ID())
+	got, err := s.Get[T](ctx, r.ID())
 	if err != nil || !reflect.DeepEqual(got, r) {
 		t.Fatalf("round trip: %+v vs %+v; %v", got, r, err)
 	}
@@ -201,7 +216,10 @@ func TestStoredJSONDecodeErrors(t *testing.T) {
 				t.Fatal(err)
 			}
 			defer raw.Close()
-			s := yuruidb.Wrap[note](raw)
+			s := yuruidb.Wrap(raw)
+			if err := s.Bind[note]("notes"); err != nil {
+				t.Fatal(err)
+			}
 			if _, err := s.Insert(ctx, nextID(t), note{Text: "valid"}); err != nil {
 				t.Fatal(err)
 			}
@@ -209,10 +227,10 @@ func TestStoredJSONDecodeErrors(t *testing.T) {
 			if _, err := raw.Insert(ctx, id, []byte(value)); err != nil {
 				t.Fatal(err)
 			}
-			if _, err := s.Get(ctx, id); err == nil || !strings.Contains(err.Error(), id) {
+			if _, err := s.Get[note](ctx, id); err == nil || !strings.Contains(err.Error(), id) {
 				t.Fatalf("decode error omitted identity: %v", err)
 			}
-			page, err := s.List(ctx, yuruidb.ListOptions{})
+			page, err := s.List[note](ctx, yuruidb.ListOptions{})
 			if err == nil || len(page.Records) != 0 || page.Cursor != "" {
 				t.Fatalf("partial page after decode failure: %+v %v", page, err)
 			}

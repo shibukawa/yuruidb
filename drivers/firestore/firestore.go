@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"github.com/shibukawa/yuruidb"
 	"github.com/shibukawa/yuruidb/auth"
@@ -89,6 +90,10 @@ func (t *transport) Read(ctx context.Context, key string) (recordstore.Item, err
 	return recordstore.Item{Data: b, Token: doc.UpdateTime}, nil
 }
 func (t *transport) Write(ctx context.Context, key string, b []byte, expected string) error {
+	_, err := t.WriteItem(ctx, key, b, expected)
+	return err
+}
+func (t *transport) WriteItem(ctx context.Context, key string, b []byte, expected string) (string, error) {
 	q := url.Values{}
 	if expected == "" {
 		q.Set("currentDocument.exists", "false")
@@ -98,7 +103,7 @@ func (t *transport) Write(ctx context.Context, key string, b []byte, expected st
 	doc := document{Fields: map[string]field{"payload": {Bytes: base64.StdEncoding.EncodeToString(b)}}}
 	body, err := json.Marshal(doc)
 	if err != nil {
-		return err
+		return "", err
 	}
 	response, err := t.client.Do(ctx, "PATCH", t.endpoint+"/"+t.parent+"/"+key+"?"+q.Encode(), body, http.Header{"Content-Type": {"application/json"}}, true)
 	if err != nil {
@@ -108,12 +113,27 @@ func (t *transport) Write(ctx context.Context, key string, b []byte, expected st
 			} `json:"error"`
 		}
 		if json.Unmarshal(response.Body, &failure) == nil && failure.Error.Status == "FAILED_PRECONDITION" {
-			return yuruidb.ErrConflict
+			return "", errors.Join(yuruidb.ErrConflict, err)
 		}
 	}
-	return err
+	if err != nil {
+		return "", err
+	}
+	var out document
+	if json.Unmarshal(response.Body, &out) != nil || out.UpdateTime == "" {
+		return "", fmt.Errorf("%w: missing Firestore updateTime", yuruidb.ErrOutcomeUnknown)
+	}
+	return out.UpdateTime, nil
 }
 func (t *transport) Keys(ctx context.Context, after string, n int) ([]string, bool, error) {
+	entries, more, err := t.Scan(ctx, after, n)
+	keys := make([]string, len(entries))
+	for i, e := range entries {
+		keys[i] = e.Key
+	}
+	return keys, more, err
+}
+func (t *transport) Scan(ctx context.Context, after string, n int) ([]recordstore.Entry, bool, error) {
 	query := map[string]any{"from": []any{map[string]any{"collectionId": t.collection}}, "orderBy": []any{map[string]any{"field": map[string]any{"fieldPath": "__name__"}, "direction": "ASCENDING"}}, "limit": n + 1}
 	if after != "" {
 		query["startAt"] = map[string]any{"values": []any{map[string]any{"referenceValue": t.parent + "/" + after}}, "before": false}
@@ -124,29 +144,54 @@ func (t *transport) Keys(ctx context.Context, after string, n int) ([]string, bo
 	if err := t.client.JSON(ctx, "POST", t.endpoint+"/"+t.parent+":runQuery", map[string]any{"structuredQuery": query}, &out, nil, false); err != nil {
 		return nil, false, err
 	}
-	keys := []string{}
+	entries := []recordstore.Entry{}
 	for _, r := range out {
 		if r.Document != nil {
 			prefix := t.parent + "/"
 			if !strings.HasPrefix(r.Document.Name, prefix) {
 				return nil, false, fmt.Errorf("yuruidb: foreign Firestore document")
 			}
-			keys = append(keys, strings.TrimPrefix(r.Document.Name, prefix))
+			b, err := base64.StdEncoding.DecodeString(r.Document.Fields["payload"].Bytes)
+			if err != nil {
+				return nil, false, err
+			}
+			entries = append(entries, recordstore.Entry{Key: strings.TrimPrefix(r.Document.Name, prefix), Item: recordstore.Item{Data: b, Token: r.Document.UpdateTime}})
 		}
 	}
-	more := len(keys) > n
+	more := len(entries) > n
 	if more {
-		keys = keys[:n]
+		entries = entries[:n]
 	}
-	return keys, more, nil
+	return entries, more, nil
 }
 func (t *transport) Close() error { return nil }
 
-// Open opens a JSON-typed collection using this driver.
-func Open[T any](ctx context.Context, c Config) (*yuruidb.Store[T], error) {
+// Open opens a connection. Bind data types to collection names before use.
+func Open(ctx context.Context, c Config) (*yuruidb.Store, error) {
 	raw, err := OpenRaw(ctx, c)
 	if err != nil {
 		return nil, err
 	}
-	return yuruidb.Wrap[T](raw), nil
+	return yuruidb.Wrap(raw), nil
+}
+
+func (t *transport) ForCollection(ctx context.Context, name string) (recordstore.Transport, error) {
+	copy := *t
+	copy.collection = name
+	return &copy, nil
+}
+
+func (t *transport) Delete(ctx context.Context, key, expected string) error {
+	response, err := t.client.Do(ctx, "DELETE", t.endpoint+"/"+t.parent+"/"+key+"?"+url.Values{"currentDocument.updateTime": {expected}}.Encode(), nil, nil, true)
+	if err != nil {
+		var remote struct {
+			Error struct {
+				Status string `json:"status"`
+			} `json:"error"`
+		}
+		if json.Unmarshal(response.Body, &remote) == nil && remote.Error.Status == "FAILED_PRECONDITION" {
+			return errors.Join(yuruidb.ErrConflict, err)
+		}
+	}
+	return err
 }

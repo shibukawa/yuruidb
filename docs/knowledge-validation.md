@@ -18,3 +18,9 @@
 12個の authored conceptと、会話原文・公式資料の観察メモを保存した。確定要件、提案、観察をauthorityとlifecycle、説明上のラベルで区別している。
 
 公式資料の調査メモは手動確認の保存物。ローカルのハッシュが一致しても、Webの上流が現在も同じである証明にはならない。クラウド接続、SDKサイズ比較、Goビルド、競合・負荷の統合テストは実施していない。
+
+## Go 1.27とbdfフィードバック対応後
+
+既存概念を接続単位のStore、Bindとメソッド型引数、名前キー、条件付き削除、結果照合、認証・Blob・依存分離に更新し、型によるコレクション分離の決定を保存した。要件原文とgo.modを再収集し、integration/go.modも別moduleの宣言として登録した。
+
+compileは警告なし、doctorはvalid、46ノード・31エッジ・92 assertion、未解決参照なし。ローカル入力は保存したsourceと一致し、公式Web資料の上流鮮度は引き続きunknownとする。issues --checkに根拠ファイルの不一致はなく、検証scopeを限定したままのverification_gap候補を12件保持する。ローカルfixtureでの成功を無制限の実サービス保証へ拡張していない。今回の実装検証はimplementation-validation.mdのGo 1.27節に記録した。

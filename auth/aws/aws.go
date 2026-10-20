@@ -30,7 +30,7 @@ func Environment(context.Context) (Credentials, error) {
 }
 func Signer(region, service string, provider Provider) auth.Authorizer {
 	if provider == nil {
-		provider = Environment
+		provider = Default(nil)
 	}
 	return func(r *http.Request) error {
 		c, err := provider(r.Context())
@@ -67,7 +67,7 @@ func Sign(r *http.Request, c Credentials, region, service string, now time.Time)
 	if c.AccessKey == "" || c.SecretKey == "" || region == "" || service == "" {
 		return fmt.Errorf("yuruidb: AWS credentials, region and service required")
 	}
-	var body []byte
+	payloadHash := sha256.New()
 	if r.Body != nil && r.Body != http.NoBody {
 		if r.GetBody == nil {
 			return fmt.Errorf("yuruidb: signing requires replayable body")
@@ -76,7 +76,7 @@ func Sign(r *http.Request, c Credentials, region, service string, now time.Time)
 		if err != nil {
 			return err
 		}
-		body, err = io.ReadAll(copy)
+		_, err = io.Copy(payloadHash, copy)
 		copy.Close()
 		if err != nil {
 			return err
@@ -85,7 +85,7 @@ func Sign(r *http.Request, c Credentials, region, service string, now time.Time)
 	now = now.UTC()
 	stamp := now.Format("20060102T150405Z")
 	date := now.Format("20060102")
-	payload := hash(body)
+	payload := hex.EncodeToString(payloadHash.Sum(nil))
 	r.Header.Set("X-Amz-Date", stamp)
 	r.Header.Set("X-Amz-Content-Sha256", payload)
 	if c.SessionToken != "" {

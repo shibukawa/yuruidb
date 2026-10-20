@@ -28,8 +28,10 @@ type transport struct {
 var identifier = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]{0,62}$`)
 
 func Open(ctx context.Context, e Executor, c Config) (yuruidb.RawStore, error) {
-	if err := yuruidb.ValidateCollection(c.Collection); err != nil {
-		return nil, err
+	if c.Collection != "" {
+		if err := yuruidb.ValidateCollection(c.Collection); err != nil {
+			return nil, err
+		}
 	}
 	if c.Table == "" {
 		c.Table = "ururidb_records"
@@ -93,9 +95,13 @@ func (t *transport) Read(ctx context.Context, key string) (recordstore.Item, err
 	return recordstore.Item{Data: b, Token: token}, err
 }
 func (t *transport) Write(ctx context.Context, key string, data []byte, expected string) error {
+	_, err := t.WriteItem(ctx, key, data, expected)
+	return err
+}
+func (t *transport) WriteItem(ctx context.Context, key string, data []byte, expected string) (string, error) {
 	token, err := yuruidb.NewRevision()
 	if err != nil {
-		return err
+		return "", err
 	}
 	payload := base64.StdEncoding.EncodeToString(data)
 	var query string
@@ -109,15 +115,15 @@ func (t *transport) Write(ctx context.Context, key string, data []byte, expected
 	}
 	changed, err := t.exec.Exec(ctx, t.bind(query), args)
 	if err != nil {
-		return err
+		return "", err
 	}
 	if changed == 0 {
-		return yuruidb.ErrConflict
+		return "", yuruidb.ErrConflict
 	}
 	if changed != 1 {
-		return fmt.Errorf("yuruidb: SQL mutation affected unexpected row count")
+		return "", fmt.Errorf("yuruidb: SQL mutation affected unexpected row count")
 	}
-	return nil
+	return token, nil
 }
 func (t *transport) Keys(ctx context.Context, after string, n int) ([]string, bool, error) {
 	rows, err := t.exec.Query(ctx, t.bind("SELECT id FROM "+t.table+" WHERE collection = ? AND id > ? ORDER BY id ASC LIMIT ?"), []any{t.collection, after, n + 1})
@@ -142,3 +148,55 @@ func (t *transport) Keys(ctx context.Context, after string, n int) ([]string, bo
 	return keys, more, nil
 }
 func (t *transport) Close() error { return t.exec.Close() }
+
+func (t *transport) ForCollection(ctx context.Context, name string) (recordstore.Transport, error) {
+	copy := *t
+	copy.collection = name
+	copy.prefix = name + "/"
+	return &copy, nil
+}
+
+func (t *transport) Delete(ctx context.Context, key, expected string) error {
+	changed, err := t.exec.Exec(ctx, t.bind("DELETE FROM "+t.table+" WHERE collection = ? AND id = ? AND token = ?"), []any{t.collection, key, expected})
+	if err != nil {
+		return err
+	}
+	if changed == 0 {
+		return yuruidb.ErrConflict
+	}
+	if changed != 1 {
+		return fmt.Errorf("yuruidb: unexpected deleted row count")
+	}
+	return nil
+}
+func (t *transport) Scan(ctx context.Context, after string, n int) ([]recordstore.Entry, bool, error) {
+	rows, err := t.exec.Query(ctx, t.bind("SELECT id, payload, token FROM "+t.table+" WHERE collection = ? AND id > ? ORDER BY id ASC LIMIT ?"), []any{t.collection, after, n + 1})
+	if err != nil {
+		return nil, false, err
+	}
+	out := make([]recordstore.Entry, 0, len(rows))
+	for _, row := range rows {
+		key, err := text(row["id"])
+		if err != nil {
+			return nil, false, err
+		}
+		payload, err := text(row["payload"])
+		if err != nil {
+			return nil, false, err
+		}
+		b, err := base64.StdEncoding.DecodeString(payload)
+		if err != nil {
+			return nil, false, err
+		}
+		token, err := text(row["token"])
+		if err != nil {
+			return nil, false, err
+		}
+		out = append(out, recordstore.Entry{Key: key, Item: recordstore.Item{Data: b, Token: token}})
+	}
+	more := len(out) > n
+	if more {
+		out = out[:n]
+	}
+	return out, more, nil
+}

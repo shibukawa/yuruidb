@@ -15,7 +15,9 @@ import (
 type Config struct {
 	DB                         *sql.DB
 	Collection, Table, Dialect string
-	AutoMigrate, CloseDB       bool
+	// Identity is a stable nonsecret database identifier for cursor/revision scope.
+	Identity             string
+	AutoMigrate, CloseDB bool
 }
 type executor struct {
 	db    *sql.DB
@@ -38,7 +40,7 @@ func OpenRaw(ctx context.Context, c Config) (yuruidb.RawStore, error) {
 	if c.DB == nil {
 		return nil, fmt.Errorf("%w: SQL DB required", yuruidb.ErrInvalid)
 	}
-	return sqlstore.Open(ctx, &executor{c.DB, c.CloseDB}, sqlstore.Config{Collection: c.Collection, Table: c.Table, Dialect: c.Dialect, Scope: "sql", AutoMigrate: c.AutoMigrate, Distributed: c.Dialect == "postgres"})
+	return sqlstore.Open(ctx, &executor{c.DB, c.CloseDB}, sqlstore.Config{Collection: c.Collection, Table: c.Table, Dialect: c.Dialect, Scope: "sql:" + c.Identity, AutoMigrate: c.AutoMigrate, Distributed: c.Dialect == "postgres"})
 }
 func (e *executor) Query(ctx context.Context, q string, args []any) ([]map[string]any, error) {
 	rows, err := e.db.QueryContext(ctx, q, args...)
@@ -93,11 +95,11 @@ func (e *executor) Close() error {
 	return nil
 }
 
-// Open opens a JSON-typed collection using this driver.
-func Open[T any](ctx context.Context, c Config) (*yuruidb.Store[T], error) {
+// Open opens a connection. Bind data types to collection names before use.
+func Open(ctx context.Context, c Config) (*yuruidb.Store, error) {
 	raw, err := OpenRaw(ctx, c)
 	if err != nil {
 		return nil, err
 	}
-	return yuruidb.Wrap[T](raw), nil
+	return yuruidb.Wrap(raw), nil
 }

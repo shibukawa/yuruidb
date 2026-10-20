@@ -26,11 +26,14 @@ func run() error {
 		return err
 	}
 	defer os.RemoveAll(dir)
-	store, err := yuruidb.Open[Note](ctx, "bbolt", yuruidb.Config{"Path": filepath.Join(dir, "records.db"), "Collection": "notes"})
+	store, err := yuruidb.Open(ctx, "bbolt", yuruidb.Config{"Path": filepath.Join(dir, "records.db")})
 	if err != nil {
 		return err
 	}
 	defer store.Close()
+	if err := store.Bind[Note]("notes"); err != nil {
+		return err
+	}
 	id, err := yuruidb.NewID()
 	if err != nil {
 		return err
@@ -43,10 +46,10 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	page, err := store.List(ctx, yuruidb.ListOptions{Limit: 10})
+	page, err := store.List[Note](ctx, yuruidb.ListOptions{Limit: 10})
 	if err != nil {
 		return err
 	}
 	fmt.Printf("%d record: %s\n", len(page.Records), page.Records[0].Data.Text)
-	return store.Delete(ctx, r.ID(), r.Revision())
+	return store.Delete[Note](ctx, r.ID(), r.Revision())
 }

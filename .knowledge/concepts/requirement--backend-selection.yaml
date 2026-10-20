@@ -18,7 +18,7 @@ assertions:
   authority: authored
   basis:
   - path: docs/requirements-input.md
-    input_hash: 401edd4f59abce29df56c883931c4409a65443dabfd87aa8424ae9aa8cc2cd23
+    input_hash: d9795855517cf2f1321c52cd5e78792aeaf8a5393a028050011a8e07071ee115
   evidence:
     locator: バックエンド組み込み方法の明確化
     input_path: docs/requirements-input.md
@@ -31,7 +31,7 @@ assertions:
   authority: authored
   basis:
   - path: docs/requirements-input.md
-    input_hash: 401edd4f59abce29df56c883931c4409a65443dabfd87aa8424ae9aa8cc2cd23
+    input_hash: d9795855517cf2f1321c52cd5e78792aeaf8a5393a028050011a8e07071ee115
   evidence:
     locator: 要件整理と拡張方法の依頼
     input_path: docs/requirements-input.md
@@ -41,7 +41,7 @@ assertions:
   authority: authored
   basis:
   - path: docs/requirements-input.md
-    input_hash: 401edd4f59abce29df56c883931c4409a65443dabfd87aa8424ae9aa8cc2cd23
+    input_hash: d9795855517cf2f1321c52cd5e78792aeaf8a5393a028050011a8e07071ee115
   evidence:
     input_path: docs/requirements-input.md
     locator: バックエンド組み込み方法の明確化
@@ -104,9 +104,9 @@ verification:
     - path: config.go
       input_hash: 12b72dfea7406b6f32bfce97a89ab1e80675f308f2dd1c34204c297074e501fa
     - path: examples/basic/main.go
-      input_hash: 7d1cd7e220b8e9f865afc211b3ad564380165fbd697c03e8c1b1014567eba27b
+      input_hash: a07adff7389b21a014002d7a3d27eb8ac88968b2a3df507ed1c31e08f253f572
     - path: docs/implementation-validation.md
-      input_hash: da702ead96402b1bc0dd9ddfba64aa1b2c7aee00df09d82033d08b9063739edf
+      input_hash: 56d9658830444f2cdd7923b3f5bb63ac534ec2a4bf2d2d7fd72e3778f753eb05
     evidence:
       input_path: docs/implementation-validation.md
     scope:

@@ -11,6 +11,15 @@ import (
 // The token must identify the stored incarnation, not merely the caller's ID.
 type Item = recordstore.Item
 
+// Entry carries a key, payload and native token from a value-bearing listing.
+type Entry = recordstore.Entry
+
+// Optional backend extensions eliminate reads or enable physical deletion.
+type ItemWriter = recordstore.ItemWriter
+type Deleter = recordstore.Deleter
+type Scanner = recordstore.Scanner
+type CollectionTransport = recordstore.CollectionTransport
+
 // Backend is an atomic key store. Keys returns strictly ascending keys after
 // the supplied key, scoped to the Config.Collection prefix. A blank expected
 // token to Write means create-if-absent. A nonblank token means atomic CAS.
@@ -18,7 +27,7 @@ type Item = recordstore.Item
 // yuruidb.ErrNotFound for absent keys. Keys may return fewer than limit keys,
 // but must make progress whenever more is true.
 //
-// Keys passed to the backend are Collection + "/" + canonical UUIDv7 ID.
+// Keys passed to the backend are Collection + "/" + validated ID.
 // Backends must preserve the opaque data supplied by Write. The adapter uses
 // revision-bearing tombstones, including for logical deletion and recreation.
 type Backend = recordstore.Transport
@@ -39,10 +48,10 @@ func NewRaw(backend Backend, config Config) (yuruidb.RawStore, error) {
 }
 
 // New constructs a JSON-typed store over an atomic backend.
-func New[T any](backend Backend, config Config) (*yuruidb.Store[T], error) {
+func New(backend Backend, config Config) (*yuruidb.Store, error) {
 	raw, err := NewRaw(backend, config)
 	if err != nil {
 		return nil, err
 	}
-	return yuruidb.Wrap[T](raw), nil
+	return yuruidb.Wrap(raw), nil
 }

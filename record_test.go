@@ -12,11 +12,14 @@ import (
 
 func TestRecordMetadata(t *testing.T) {
 	ctx := context.Background()
-	s, err := memory.Open[note](ctx, memory.Config{Collection: "notes"})
+	s, err := memory.Open(ctx, memory.Config{Collection: "notes"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer s.Close()
+	if err := s.Bind[note]("notes"); err != nil {
+		t.Fatal(err)
+	}
 	id := nextID(t)
 	original, err := s.Insert(ctx, id, note{Text: "original"})
 	if err != nil {
@@ -47,11 +50,14 @@ func TestRecordMetadata(t *testing.T) {
 
 func TestRecordJSON(t *testing.T) {
 	ctx := context.Background()
-	s, err := memory.Open[note](ctx, memory.Config{Collection: "notes"})
+	s, err := memory.Open(ctx, memory.Config{Collection: "notes"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer s.Close()
+	if err := s.Bind[note]("notes"); err != nil {
+		t.Fatal(err)
+	}
 	original, err := s.Insert(ctx, nextID(t), note{Text: "hello", Labels: map[string]string{"lang": "ja"}})
 	if err != nil {
 		t.Fatal(err)

@@ -14,6 +14,7 @@ import (
 	"github.com/shibukawa/yuruidb/internal/recordstore"
 	"net/http"
 	"net/url"
+	"strings"
 )
 
 type Config struct {
@@ -132,6 +133,9 @@ func (s *RawStore) Set(ctx context.Context, id string, value []byte) (yuruidb.Ra
 		return yuruidb.RawRecord{}, err
 	}
 	err = s.transport.mutate(ctx, "PUT", s.prefix+id, b)
+	if errors.Is(err, yuruidb.ErrOutcomeUnknown) {
+		return yuruidb.RawRecord{}, &yuruidb.MutationError{Operation: "set", Collection: strings.TrimSuffix(s.prefix, "/"), ID: id, Nonce: revision, AttemptedRevision: revision, Cause: err}
+	}
 	if err != nil {
 		return yuruidb.RawRecord{}, err
 	}
@@ -146,7 +150,11 @@ func (s *RawStore) Remove(ctx context.Context, id string) error {
 	if err := yuruidb.ValidateID(id); err != nil {
 		return err
 	}
-	return s.transport.mutate(ctx, "DELETE", s.prefix+id, nil)
+	err := s.transport.mutate(ctx, "DELETE", s.prefix+id, nil)
+	if errors.Is(err, yuruidb.ErrOutcomeUnknown) {
+		return &yuruidb.MutationError{Operation: "remove", Collection: strings.TrimSuffix(s.prefix, "/"), ID: id, Cause: err}
+	}
+	return err
 }
 
 func (t *transport) mutate(ctx context.Context, method, key string, body []byte) error {
@@ -166,11 +174,27 @@ func (t *transport) mutate(ctx context.Context, method, key string, body []byte)
 	return nil
 }
 
-// Open opens a JSON-typed collection using this driver.
-func Open[T any](ctx context.Context, c Config) (*yuruidb.Store[T], error) {
+// Open opens a connection. Bind data types to collection names before use.
+func Open(ctx context.Context, c Config) (*yuruidb.Store, error) {
 	raw, err := OpenRaw(ctx, c)
 	if err != nil {
 		return nil, err
 	}
-	return yuruidb.Wrap[T](raw), nil
+	return yuruidb.Wrap(raw), nil
+}
+
+func (t *transport) ForCollection(ctx context.Context, name string) (recordstore.Transport, error) {
+	copy := *t
+	copy.prefix = name + "/"
+	return &copy, nil
+}
+
+func (s *RawStore) OpenCollection(ctx context.Context, name string) (yuruidb.RawStore, error) {
+	view, err := s.Store.OpenCollection(ctx, name)
+	if err != nil {
+		return nil, err
+	}
+	t := *s.transport
+	t.prefix = name + "/"
+	return &RawStore{Store: view.(*recordstore.Store), transport: &t, prefix: t.prefix}, nil
 }

@@ -1,8 +1,8 @@
 id: system:ururidb
 type: system
 title: yuruidb portable Go record storage
-summary: An embeddable Go 1.26+ library for typed JSON records, selectable storage backends, ID CRUD, and creation-ordered
-  listing.
+summary: An embeddable Go 1.27+ library with connection-scoped Store, type-bound collections, JSON records and ascending
+  ID listing.
 lifecycle: accepted
 authority: authored
 aliases:
@@ -17,7 +17,7 @@ facts:
   - docs/requirements-input.md
   human_summary: docs/requirements.ja.md
   evidence_notes: docs/backend-evidence.md
-  current_milestone: Initial implementation and documented verification completed.
+  current_milestone: Go 1.27 multi-collection and bdf feedback implementation locally verified.
   validation_report: docs/knowledge-validation.md
   implementation_guide: docs/implementation.ja.md
   implementation_report: docs/implementation-validation.md
@@ -30,11 +30,10 @@ facts:
     English: README.md
     Japanese: README.ja.md
   license: Apache-2.0
-  minimum_go_version: 1.26.0
-  record_api: Open[T], Store[T], Record[T] with ID()/Revision() accessors and editable Data, Page[T]; JSON encoding
-    in the common layer.
+  minimum_go_version: 1.27.0
+  record_api: Open and Store own a connection; Bind[T] selects stable collections; Get[T]/List[T]/Delete[T] use
+    generic methods; Record[T]/Page[T] retain typed data.
   verified_go_versions:
-  - 1.26.0
   - 1.27.0
 assertions:
 - key: product
@@ -43,7 +42,7 @@ assertions:
   authority: authored
   basis:
   - path: docs/requirements-input.md
-    input_hash: 401edd4f59abce29df56c883931c4409a65443dabfd87aa8424ae9aa8cc2cd23
+    input_hash: d9795855517cf2f1321c52cd5e78792aeaf8a5393a028050011a8e07071ee115
   evidence:
     input_path: docs/requirements-input.md
 - key: product-name
@@ -52,7 +51,7 @@ assertions:
   authority: authored
   basis:
   - path: docs/requirements-input.md
-    input_hash: 401edd4f59abce29df56c883931c4409a65443dabfd87aa8424ae9aa8cc2cd23
+    input_hash: d9795855517cf2f1321c52cd5e78792aeaf8a5393a028050011a8e07071ee115
   evidence:
     input_path: docs/requirements-input.md
     locator: ライブラリ名とリポジトリ
@@ -62,7 +61,7 @@ assertions:
   authority: observed
   basis:
   - path: go.mod
-    input_hash: dcf571aed9e1685ae6a1de15e63471fb88b9f38e88e0083874caf4dc808767e3
+    input_hash: e44147fdb31655b4b1f85a3e3f469753946b6112bd0236946c3f66c233edb88c
   evidence:
     input_path: go.mod
 - key: readme-languages
@@ -73,7 +72,7 @@ assertions:
   authority: authored
   basis:
   - path: docs/requirements-input.md
-    input_hash: 401edd4f59abce29df56c883931c4409a65443dabfd87aa8424ae9aa8cc2cd23
+    input_hash: d9795855517cf2f1321c52cd5e78792aeaf8a5393a028050011a8e07071ee115
   evidence:
     input_path: docs/requirements-input.md
     locator: 初版の公開とドキュメント・ライセンス
@@ -83,20 +82,20 @@ assertions:
   authority: authored
   basis:
   - path: docs/requirements-input.md
-    input_hash: 401edd4f59abce29df56c883931c4409a65443dabfd87aa8424ae9aa8cc2cd23
+    input_hash: d9795855517cf2f1321c52cd5e78792aeaf8a5393a028050011a8e07071ee115
   evidence:
     input_path: docs/requirements-input.md
     locator: 初版の公開とドキュメント・ライセンス
 - key: go-minimum
   predicate: minimum_go_version
-  value: '1.26'
+  value: '1.27'
   authority: authored
   basis:
   - path: docs/requirements-input.md
-    input_hash: 401edd4f59abce29df56c883931c4409a65443dabfd87aa8424ae9aa8cc2cd23
+    input_hash: d9795855517cf2f1321c52cd5e78792aeaf8a5393a028050011a8e07071ee115
   evidence:
     input_path: docs/requirements-input.md
-    locator: Goの最低バージョンと型付きJSONレコード
+    locator: bdf利用前のフィードバックと追加方針
 relations:
 - relation: requires
   to: requirement:record-crud
@@ -128,7 +127,7 @@ verification:
       locator: 要件メモリの検証記録
     basis:
     - path: docs/knowledge-validation.md
-      input_hash: d402bd8c86f8618f057f71144c0e91ac2997a93955aa89eee6c5bce3739ba25c
+      input_hash: d9af82d1a87d3433fb9f785126a1cef0dbfb690b1a61e6717515c31baaf05445
   initial-library:
     state: passed
     method: integration
@@ -136,11 +135,11 @@ verification:
     authority: observed
     basis:
     - path: adapter/adapter.go
-      input_hash: ed116c23c49ec09cabca8e5f7b5d61f94a9ff36325d5135ae50554b61241bb2a
+      input_hash: 8671fa4ee8340f4c65479da50daabf2b8f55e3c46ee2f4d2e7c7d92f6134ba6f
     - path: auth/auth.go
       input_hash: e76ff2a96dfa21a6115602e7cadce14a2c3f086f1a75e4c1c8d7fbf7f37c3f51
     - path: auth/aws/aws.go
-      input_hash: d44269135ca9006c95abcec124e48d4486889d9338ceee555cea1533fe8b4953
+      input_hash: aa900784bb48ee1ca2070c4b01f9fca36023421bfafd8effe2f46db324415b10
     - path: auth/aws/aws_test.go
       input_hash: bf8ab31a2215a161f0d70172757eb9b357166a84435d25b3a00d08cffa9331d0
     - path: auth/gcp/metadata.go
@@ -176,89 +175,89 @@ verification:
     - path: config_test.go
       input_hash: e7c862bc0777951a96963efd0f180568ec0b7ec803e8c4e7e7943e1cd7a298c9
     - path: drivers/bbolt/bbolt.go
-      input_hash: 4fafe4cac0bc243922cfac8ab9ff92c7640eb0cf0c5b91f79e35a89740cc35c0
+      input_hash: 0276be60608c8cbcf6c7617c459f2ff6ccfbbedc3d2e156fdce57dc2ca695f6f
     - path: drivers/bbolt/bbolt_test.go
-      input_hash: 7982c8178dc231e621ed16f3dd42593f0ab6b2e272d28dae8304dc26987fe4fb
+      input_hash: a74249b3e187fe18824e49dfcaa4ea177b4025a4d63ea63361e0e55046e789a4
     - path: drivers/cfkv/cfkv.go
-      input_hash: 17e40c1c926ea558c0649761aa30f414f1d28a3f63c9f388fec8a0c877672c57
+      input_hash: 67933e6fe54787dfc3ee354d42e9887149ba2929540a9fd8246898e66e1e4708
     - path: drivers/cfkv/cfkv_test.go
-      input_hash: 7ab01019b5ede7a85260b627809eb1199257e669f457e3734bc8da00ffee2828
+      input_hash: 0a1e072f2fcda239ef636e386152370923d03053f457019daf29e69d8c12d966
     - path: drivers/d1/d1.go
-      input_hash: c0196a76aed64ac20e22907b51a50fd3b43f552e81e7ecd436a095542b73fa45
-    - path: drivers/d1/d1_test.go
-      input_hash: dcc15d267ddc7564f9eac234c19344ed0baeac210e5c5789a06d6c3d2c938cc4
+      input_hash: 8b249910026f339b43637c52af543c63e7824b4979ac9011e758f45a3543e4b5
+    - path: integration/d1_test.go
+      input_hash: 682fcd218069851f5c604a0337632330a481eac9063c448542b0505a1ecd8ba8
     - path: drivers/dynamodb/dynamodb.go
-      input_hash: 0861b7e2d0b9d57ab2b373b7c2c40ebc963da5849fc7815960e65e54d2f85ee1
+      input_hash: 07ab7593f5daa128b4410ee0fac7925d58dceb0d58a92d9ac50a50205def60c6
     - path: drivers/dynamodb/dynamodb_test.go
       input_hash: 3f02148d443e7219d167e6b9e2624030001879da30a626f5fb383808dbff69ca
     - path: drivers/firebase/firebase.go
-      input_hash: 932d40925ffa68272b6d2411c90a24b1dbaa4d5cdf043b707479bcce5ed16fa4
+      input_hash: 8811cbdfa54ba3be1ff798d92155f2baa4f399d1edc91beffbcd37b04f5aee86
     - path: drivers/firebase/firebase_test.go
       input_hash: 390a50aacc81e2b70ea47e9d7fd384ab3df20d2a7388448e0dc273aba3a63354
     - path: drivers/firestore/firestore.go
-      input_hash: 3df2edf07efd5608f1150bf465d042287f0ecd8e9674ed0a9c87f1a74af478e8
+      input_hash: c7168f954ca0be49ececbf1388b51f39cb97c933adf0adaffd8055a01b910ff6
     - path: drivers/firestore/firestore_test.go
       input_hash: 8779d152f802b006a596757b9d1bd39ad4dd01143715eb37a8fa09400623e282
     - path: drivers/gcs/gcs.go
-      input_hash: d939d47f2a57bd270bd061abe14ecfdc1a84058302967334ee3b8bda17bd6503
+      input_hash: cda23c1d94dba975050a5f2382614ad21bff774ebc2ef1a92ec2eee0a6350e8b
     - path: drivers/gcs/gcs_test.go
       input_hash: cd770c1d0d0948c299689221ad864c39e9d18c81b5630622e09f884a70818284
     - path: drivers/memory/memory.go
-      input_hash: 5d91f5e7d4475e321db06c9ddacfb8126a70461bfd33702fd2bfe1d3a0ea1fe4
+      input_hash: 38e41a8a4d5adfa3d5b676f42c2eb064beb9a724346a2f5c2ddffc553eceb23d
     - path: drivers/memory/memory_test.go
       input_hash: 19665a510d546fd6e7c0fefaecf3d11114b1e62aa4b5a9a4a5559264887f739b
     - path: drivers/r2/r2.go
-      input_hash: be2892698539cda4d3e4c0eefc4fbbfc924afe885042404dea2e07dfdc0774ad
+      input_hash: 57648b753c27333da3e6659d037066536ccdc30fa5bc98f57311820470d048e7
     - path: drivers/r2/r2_test.go
       input_hash: 3de87a8f0ff3a4f3817f8754dee8916d1b0cee995af3ae00ed278d1eebeefcf9
     - path: drivers/s3/s3.go
-      input_hash: cd94aa1a23039ca318f0f1eafa58908322b9d4366ac50f6f61125e924f33f6e7
+      input_hash: dfd4a6287fc01d0356929e2021c5dd42c746ff8c01b75195446df9392290bc4c
     - path: drivers/s3/s3_test.go
       input_hash: cf605feb388a516b1788ea8f00db3ad3aedc32221e01cc2302d9e16d7dca5aa7
     - path: drivers/sql/sql.go
-      input_hash: f8f0c7d443f6eca9cba6bb06acf665f0ccb2d222477a1b5f014cd002c99e8a55
-    - path: drivers/sql/sql_test.go
-      input_hash: 3f68768cb50620ff6e3ef0368b4beebcc3f3ef400821d760a25a5e84982cbf1c
+      input_hash: 44fcc3aff9a7d431d99142c6f505014a28b9b2bc80a7819e2acc0a608ff5e99e
+    - path: integration/sql_test.go
+      input_hash: a4883a6a6540108440b9483c779946504acfe82b1111ce3f2c37e825659e745c
     - path: examples/basic/main.go
-      input_hash: 7d1cd7e220b8e9f865afc211b3ad564380165fbd697c03e8c1b1014567eba27b
+      input_hash: a07adff7389b21a014002d7a3d27eb8ac88968b2a3df507ed1c31e08f253f572
     - path: examples/drivers/main.go
       input_hash: 21e149802a374a06f20b4cf2d91bb925e88d1f91e9af0d67c54fab3e6496dabc
     - path: id.go
-      input_hash: 706422e1415b75d85b8a153aa765d3ee673a92d8c8b161beee93d2affd668854
+      input_hash: c6eaccd33f2aab2065c909687d81770f88b189063b68b0cb6575e116f0e00c7e
     - path: id_test.go
-      input_hash: 86403bee6425904b482678db4fa299ceb3cbfa4fc4a19ee93161d1d4040e4e30
+      input_hash: 101abe7c3a05533d332000f13b98fa073846ae2cfe05727a256f910efe031060
     - path: internal/conformance/conformance.go
-      input_hash: 6a8a6310e325545cee6703bdacde8725ce6a04486572083196c29d0683cd08ba
+      input_hash: 0e68dfbe3e4c9e2fced6b5dac556e1f896aa96c38aa4ee0ac7ca6a81824434a1
     - path: internal/httpx/http.go
-      input_hash: cb80a30478a0b530ecc611fac720273290503091339804cd003d9400625f28bf
+      input_hash: 2f38fe4b50924e7a3b8e109733e9235d981f2a5c4577fe3125d68cc3247e430e
     - path: internal/httpx/http_test.go
-      input_hash: 5db0867a4156bda035c532dce6c8caf62a5c543d3a32c5ad02df884164d754fd
+      input_hash: c4a40fadec75bded53c9d7386491ded13693de0ebf6684aa63cab610d8308265
     - path: internal/protocoltest/server.go
-      input_hash: 4844fc7af8b052001645f3e64f00e0516f2c04b0573777df24f1008dfd40cf01
+      input_hash: c34431b30320dada5f640909a7b3872b93bf59f3e98c3f5a74cd7e7ebc9bfa33
     - path: internal/recordstore/store.go
-      input_hash: ab76d1226e9024b29273fca59fbd3d445da9f23c34ce978d0123c88e9c153fb0
+      input_hash: 4eba497728ad538a70a7239f7412b001a083e06c2752cde8a1c1d75bef459a65
     - path: internal/s3api/s3.go
-      input_hash: c8f0ccbeb37c93d47b8432b86a442e0d67677379a0dc49c364118b3eef205b24
+      input_hash: 4a7b68b7e977e0082238769d6369189514c564acb707b92cceac0d7b5249b04d
     - path: internal/sqlstore/sql.go
-      input_hash: 6671e3f11c3f065357b2659969419f39eaeb341a763db1b10a9b73f8afd463e7
+      input_hash: 1421c72b93fdecb4592a2f1d0cf4782ac7331fc5e278d265d8e3bc5ab198c009
     - path: store.go
-      input_hash: 6a2f8325336ed512d02d3f1032200ce17e13d19cba32f31622f33457c46e95be
+      input_hash: 67c6715d4c2d21c1cac5b2312b4dafc87b25916cc0f9727af6114c0b95292e0b
     - path: go.mod
-      input_hash: dcf571aed9e1685ae6a1de15e63471fb88b9f38e88e0083874caf4dc808767e3
+      input_hash: e44147fdb31655b4b1f85a3e3f469753946b6112bd0236946c3f66c233edb88c
     - path: go.sum
-      input_hash: 2a17e304feaa269ee89a2370384b7752b06c8659f53252eea011f83305ef7392
+      input_hash: e663dd92bab5377e38dc040cfd79b830061fb957c19f9d962b68dff8991702bd
     - path: scripts/check-builds.py
       input_hash: 616e685b0406c9bc8bfde7ce1b48cf41addc0f311a3e1efa43ad4f63b7e99c12
     - path: docs/implementation-validation.md
-      input_hash: da702ead96402b1bc0dd9ddfba64aa1b2c7aee00df09d82033d08b9063739edf
+      input_hash: 56d9658830444f2cdd7923b3f5bb63ac534ec2a4bf2d2d7fd72e3778f753eb05
     - path: raw.go
-      input_hash: 924f3f0aaab3b6aed88fececc7c35d8928cc57d69ce8605a5221f683ca702ced
+      input_hash: b2b8a6aa37daad55d8e8c452764bfd4497a3b1219a8da2403bdfed8630c9c023
     - path: store_test.go
-      input_hash: 6b85d86b0a9101cffe03e885416898efaad1f212dcbe4655f50e6e29e5482bad
+      input_hash: e197ae084b89d56ebb5ff1f94e6bfbf0d8c2b5e13cc5b546a01c6582c945ad6b
     - path: record.go
       input_hash: 720514acfcf76c8e0df7cb75a5e5524871275f00c2015a2b96ca87c2917f0b9d
     - path: record_test.go
-      input_hash: fa0dcbbfae969bba7c215582ef7014b0c8d73237866b540696fbdc434909af7e
+      input_hash: 2ddb19c8f1d00354c40e0522da0099242b2b968d55cc8f1bf6b1ef9e07921e13
     evidence:
       input_path: docs/implementation-validation.md
     scope:
@@ -273,9 +272,9 @@ verification:
     authority: observed
     basis:
     - path: README.md
-      input_hash: e1d6bf0857a9cec4c9a66615a264e07d4370923368d9c09d5d79ba988cb0874c
+      input_hash: a336b32d6ecefd8d662aa568a5073c80ca6e94e6ccca0e324cb43163308cd17a
     - path: README.ja.md
-      input_hash: bd16938c2fc0caca0632a2c6764c4cd74b319378fb8deae17f42f023a2117151
+      input_hash: f4c435bba9a55824a6a156e43d7913c09923abd583e01d9aa9c3397f34ca3889
     - path: LICENSE
       input_hash: cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30
 history:
@@ -284,3 +283,9 @@ history:
     evidence:
       input_path: docs/requirements-input.md
       locator: ライブラリ名とリポジトリ
+  generic-methods:
+    summary: The user replaced the Go 1.26 collection-scoped Open[T]/Store[T] API with Go 1.27 generic methods and
+      separate defined types Done/Waiting.
+    evidence:
+      input_path: docs/requirements-input.md
+      locator: bdf利用前のフィードバックと追加方針

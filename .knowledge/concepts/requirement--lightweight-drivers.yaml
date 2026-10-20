@@ -16,7 +16,7 @@ assertions:
   authority: authored
   basis:
   - path: docs/requirements-input.md
-    input_hash: 401edd4f59abce29df56c883931c4409a65443dabfd87aa8424ae9aa8cc2cd23
+    input_hash: d9795855517cf2f1321c52cd5e78792aeaf8a5393a028050011a8e07071ee115
   evidence:
     input_path: docs/requirements-input.md
 facts:
@@ -32,10 +32,10 @@ facts:
   - maintenance burden
   sdk_alternative: Evaluate selected AWS SDK v2 modules against a handwritten HTTP client rather than assuming a
     size result.
-  implemented_dependency_boundary: Standard-library-only core and cloud HTTP drivers. Single module currently declares
-    bbolt and test-only SQLite, without any cloud SDK.
-  auth_implementation: Per-request SigV4 credential provider, bearer/query token providers, injected HTTP clients,
-    and optional cached GCP metadata tokens.
+  implemented_dependency_boundary: Standard-library-only core and cloud drivers; root module declares bbolt; test-only
+    cgo SQLite is isolated in integration/go.mod.
+  auth_implementation: SigV4 with environment/web identity/container/IMDSv2 role providers and refresh, plus injected
+    providers and GCP metadata tokens.
 acceptance:
   dependency-isolation:
     text: Using the core and one explicitly selected driver does not force import of unrelated backend implementations.
@@ -51,9 +51,9 @@ verification:
     - path: scripts/check-builds.py
       input_hash: 616e685b0406c9bc8bfde7ce1b48cf41addc0f311a3e1efa43ad4f63b7e99c12
     - path: go.mod
-      input_hash: dcf571aed9e1685ae6a1de15e63471fb88b9f38e88e0083874caf4dc808767e3
+      input_hash: e44147fdb31655b4b1f85a3e3f469753946b6112bd0236946c3f66c233edb88c
     - path: docs/implementation-validation.md
-      input_hash: da702ead96402b1bc0dd9ddfba64aa1b2c7aee00df09d82033d08b9063739edf
+      input_hash: 56d9658830444f2cdd7923b3f5bb63ac534ec2a4bf2d2d7fd72e3778f753eb05
     evidence:
       input_path: docs/implementation-validation.md
     scope:

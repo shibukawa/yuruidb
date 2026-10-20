@@ -99,11 +99,11 @@ func (e *executor) Exec(ctx context.Context, q string, args []any) (int64, error
 }
 func (e *executor) Close() error { return nil }
 
-// Open opens a JSON-typed collection using this driver.
-func Open[T any](ctx context.Context, c Config) (*yuruidb.Store[T], error) {
+// Open opens a connection. Bind data types to collection names before use.
+func Open(ctx context.Context, c Config) (*yuruidb.Store, error) {
 	raw, err := OpenRaw(ctx, c)
 	if err != nil {
 		return nil, err
 	}
-	return yuruidb.Wrap[T](raw), nil
+	return yuruidb.Wrap(raw), nil
 }

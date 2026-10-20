@@ -1,89 +1,67 @@
 # 実装ガイド
 
-## APIとstatic import
+Go 1.27以上を対象とする。接続単位の非ジェネリックなStoreをOpenし、`Bind[T](collection)`で型と永続化する名前を対応づける。Get[T]・List[T]・Delete[T]はメソッドの型引数で対象を選ぶ。InsertとUpdateはDataから型を推論できる。Record[T]とPage[T]は維持し、ID()・Revision()が読み取り専用メタデータ、Dataが編集可能な値となる。
 
-Go 1.26以上を対象とする。Store[T]はコレクションに紐づくInsert / Get / List / Update / Deleteを持ち、Record[T]のID()・Revision()・Dataでレコードを表す。各ドライバのOpen[T](ctx, Config)、または登録経由のyuruidb.Open[T](ctx, name, config)で接続する。登録経由では、ドライバへの直接importが不要なyuruidb.Configも使える。
+## 接続とコレクション
 
-設定マップのキーは各Configのフィールド名で、大文字小文字を区別しない。不明フィールド、型違い、同じフィールドの重複指定はエラー。Clientや認証コールバックも値として渡せる。durationには`"2s"`のような文字列も指定できる。
+Open(ctx, driver, Config)または各ドライバのOpen(ctx, Config)で接続する。Configはドライバの設定型か、フィールド名を大文字小文字を区別せず指定するyuruidb.Config。未知の項目、型違い、重複項目は拒否する。HTTPクライアントや認証コールバックも渡せる。登録はimport時、接続はOpen時に行う。
 
-backends/import_*.goがタグに応じてドライバをblank importする。個々のドライバはタグなしでもstatic importで利用できる。登録時に接続や認証通信はしない。yuruidb.Drivers()で組み込まれた名前を確認できる。
+BindはI/Oを行わず、型と名前を登録する。最初の操作でRawStore.OpenCollection相当の借用処理を用意し、接続を共有する。型の付け替えと同じコレクションへの別型登録は拒否する。Tと*Tは同じ登録先で、異なる名前付き型は区別する。type Done Jobとtype Waiting Jobで同じ構造の別データ種を表せる。type Done = Jobというエイリアスは区別しない。名前付き型は元の型のメソッドを引き継がない。
 
-共通コアは標準ライブラリだけをimportする。現在は単一moduleで、bboltの依存とテスト用SQLiteドライバもgo.modに記録する。タグはmodule依存を分離しない。module pathは設定済みoriginに合わせたgithub.com/shibukawa/yuruidb。
+Closeの所有者はStoreだけで、内部のコレクション処理は接続を閉じない。bboltは正規化・symlink解決したパス単位で*bolt.DBを共有し、最後の所有者がCloseして閉じる。共有中のMode・Timeoutの不一致はErrInvalid。相対パスは絶対パスへ正規化する。hard linkによる同一ファイルの別名は統合しない。SQLの注入DBはCloseDBがtrueの場合だけ閉じる。
 
-## JSONとジェネリクス
+bboltはbucket、SQL/D1はcollection列、DynamoDBはpk、オブジェクトストレージはcollection/というprefixで分離する。S3のprefixには末尾の/を含め、jobs-oldをjobsと混在させない。同じStoreを使っても複数コレクションの変更はトランザクションにならない。
 
-共通Store[T]がencoding/jsonでDataを保存用バイト列へ変換する。Record[T]は非公開のid・revisionと公開フィールドData T、Page[T]はRecords []Record[T]・Cursor stringを持つ。メタデータはID()・Revision()で読み、Updateは新しいRecordを返す。InsertとUpdateはdata Tを受け取る。型制約はanyで、書き込み前にmarshalとunmarshalを行い、JSONにできない値やTへ復元できない値にはErrInvalidを返す。JSONタグ、ポインタ、map、RawMessage、独自のJSONメソッドを利用できる。
+## 値・ID・Revision
 
-読み取りはTへ復元し、不正なJSONや型の不一致はエラーにする。Listの復元失敗では部分ページを返さない。通常のJSON復元により、入力と戻り値のslice・map・ポインタの共有を避ける。独自UnmarshalJSONによる共有はその実装に従う。any内の数値はfloat64になり、JSONに出ない非公開フィールドも保持しない。同じコレクションでは互換スキーマを使う。
+Storeがencoding/jsonでDataを符号化する。書き込み前にTへの復元も検証し、非対応の値や復元不能なカスタムMarshalJSONはErrInvalid。読み取りのJSON不正・型不一致はエラーとし、Listは部分ページを返さない。通常のmap・sliceは入力と戻り値で共有しない。独自JSONメソッド内部の共有はその実装に従う。
 
-ドライバはRawStore・RawRecord・RawPageで既存のバイト列契約を実装する。Registerのfactoryは非ジェネリックで、アプリのTに依存しない。OpenRawとWrap[T]で独自の合成もできる。保存エンベロープ形式は維持し、JSONをそのpayloadへ格納する。以前の任意バイト列がJSONでなければ型付き読み取りには使えない。
+IDは1〜256文字のASCII英数字・ドット・アンダースコア・ハイフン。単独の.・..とFirestore予約名__…__は拒否する。NewIDはRFC 9562 UUIDv7を生成する。プロセス内は時計の巻き戻りを含めて単調増加し、別プロセス間の厳密な確定順は保証しない。一覧はIDのバイト列昇順で、任意キーの作成順や数値順は保証しない。
 
-RecordのJSON表現はid・revision・dataを保つ。MarshalJSON/UnmarshalJSONで非公開メタデータも変換し、復元時はRecord全体を置き換える。復元エラー時には既存Recordを変更しない。
+永続エンベロープ内のRevisionは書き手が生成する乱数nonce。公開Revisionはr1.に続く不透明な符号化で、接続先のscope・コレクション・ID・nonce・保存先tokenを保持する。呼び出し側は解析せずそのまま返す。tokenを返せない保存先では必要に応じて読み直してCASする。SQLはIdentityを指定すると別の注入DBを区別できる。省略時は接続先DBそのものを区別しないため、別DBへカーソル・Revisionを流用しない。memoryは接続ごとに識別子を持つ。
 
-## 認証とHTTP
+Insertは条件付き作成を先に行う。通常1回のWriteで完了し、競合時だけ既存値を読む。生きた値ならErrAlreadyExists、墓標ならその保存先tokenでCASして再作成する。Updateは公開Revision内のtokenで事前GETを省く。成功後の保存先tokenを返せない外部adapterは読み直しを使う。競合時に新しいRevisionへ乗り換える処理はない。
 
-AWSのS3・DynamoDBはauth/awsのSigV4署名を使う。既定ではAWS_ACCESS_KEY_ID、AWS_SECRET_ACCESS_KEY、AWS_SESSION_TOKENをリクエストごとに読む。Lambdaの環境認証情報で利用できる。共有profile、SSO、AssumeRoleチェーンは未実装。必要ならCredentialsコールバックかAuthorizeを注入する。
+## 削除・一覧・保存形式
 
-R2はアカウントのS3互換EndpointとCredentialsを明示する。Region標準値はauto。S3・R2はpath-styleアクセスを使う。S3 directory bucket、multipart upload、S3互換サービスすべての互換性は対象外。
+bbolt・memory・SQL/D1・DynamoDB・GCS・Firestore・Realtime Database・AWS S3は条件付き物理削除を使う。独自S3/R2は診断でDELETE条件を確認できた場合だけ使い、非対応なら条件付き墓標に戻す。CF KVは条件付きCRUDを提供しない。古い更新・削除は、再作成後のtokenと一致しないため適用できない。
 
-GCS・Firestore・Realtime Database・D1・KVのTokenはauth.TokenProviderで、リクエストごとに取得できる。固定トークンにはauth.StaticToken(token)、GCP環境にはauth/gcp.Metadata(client)を渡せる。Metadataは期限付きトークンをキャッシュする。ローカルADC、サービスアカウントJWT、workload federationは呼び出し側の認証を注入する。
+既存の墓標は`PurgeTombstones[T](ctx)`で掃除する。墓標の読み取り後に保存先tokenを条件として削除するので、同時に再作成した生きた値を消さない。途中で失敗すると削除済み件数とエラーを返す。S3のバージョニング・GCSの保持設定による容量やbboltファイルのcompactionは、この一覧負荷の改善とは別に扱う。
 
-```go
-// NoteはアプリのJSONデータ型。
-// _ "github.com/shibukawa/yuruidb/backends" と "github.com/shibukawa/yuruidb/auth/gcp" をimportし、-tags gcpでビルド。
-store, err := yuruidb.Open[Note](ctx, "gcs", yuruidb.Config{
-    "Bucket": "my-bucket",
-    "Collection": "notes",
-    "Token": gcp.Metadata(nil),
-})
-```
+bbolt・memory・SQL/D1・DynamoDB・Firestoreは値付き一覧を使い、キーごとのReadを省く。S3/R2/GCSはキーだけを一覧し、必要なレコードを読む。Firebaseの一覧応答には各値のnative ETagがないため個別Readを残す。カーソルはscopeと最後のキーを持ち、別コレクションのカーソルを拒否する。ページ間スナップショットはなく、同時更新・削除・カーソルより前の挿入があり得る。
 
-Realtime DatabaseはOAuthのBearer認証を既定とする。Firebase ID tokenではIDToken: trueでauthクエリを使う。Endpointは対象DBのベースURL。FirestoreのEndpoint標準値はhttps://firestore.googleapis.com/v1、Database標準値は(default)。両製品は別ドライバとして実装した。
+bboltはYRE1の識別子、ID長、削除フラグ、ID、64文字nonce、生のpayloadを保存する。外側のJSON/base64とpayloadのbase64をともに省く。他の保存先のEnvelopeはJSONである。
 
-既定のHTTPクライアントは30秒でタイムアウトし、redirectを追わない。Clientを注入した場合は、そのtimeout・transport・redirect設定に従う。レスポンス上限は32MiB。実際のレコードサイズは符号化とサービス側の制限にも依存する。
+Firebaseの物理IDはx＋論理IDのhex符号化。ドット入りホスト名も扱え、数値キーの特殊な順序を避けて論理IDのバイト列順を保つ。削除もIf-Match付きDELETEで実施する。[公式APIの条件付きリクエスト](https://firebase.google.com/docs/reference/rest/database/#section-expected-responses)
 
-自動再試行は行わない。送信後の通信断や5xxなどではErrOutcomeUnknownを返す。HTTPエラーには認証クエリ付きURLやレスポンス本文を含めない。全操作がcontextを受け取る。
+## 結果不明と再試行
 
-## スキーマと接続先
+レコードの書き込みでErrOutcomeUnknownが返った場合、contextが生きていてStrongReadsを宣言する保存先なら、nonceを読み直して照合する。同じnonceを確認できた場合だけ成功として返す。それ以外はMutationErrorを返し、Operation・Collection・ID・Nonce・ExpectedRevision・AttemptedRevisionを残す。errors.IsでErrOutcomeUnknown、errors.Asで詳細を取得できる。MatchesRevisionでnative tokenが不明でも試行した版を照合できる。
 
-S3・R2・GCSは既存バケットを使い、collection/UUIDv7をキーにする。コレクションのprefixはライブラリ専用とし、別形式のオブジェクトを混在させない。
+不一致は失敗の証明ではなく、成功後の別更新もあり得る。contextが失効したら新しいcontextを呼び出し側が明示して照合する。物理削除で不在を確認しても、誰の削除が成功したかは証明できない。
 
-DynamoDBのテーブルは利用側で作る。キーは文字列pkと文字列sk。pkにコレクション、skにcollection/UUIDv7、payloadにbinary、tokenに文字列を格納する。Get・QueryにはConsistentReadを指定し、GSIは使わない。コレクション単位のパーティションに負荷が集中する点には留意が必要。
+共通HTTPは429/500/502/503/504を最大3回まで試みる。本文・条件を変えずに再署名し、短いbackoffとjitterを使う。Retry-Afterが2秒を超える場合はその最小時間より早く再送せず、エラーを返す。条件付き書き込みだけを再送し、無条件KV変更とD1の変更操作はそのまま再送しない。応答不明の後に条件競合が来ても結果不明を維持し、上位で照合する。通信エラーそのものを無条件に繰り返す実装ではない。
 
-SQLにはDB: *sql.DBとDialect: sqliteまたはpostgresを渡す。DBドライバはアプリ側でimportする。AutoMigrate: trueならテーブルを作り、既定では既存スキーマを使う。CloseDB: trueの場合だけStore.CloseがDBも閉じる。
+既定のJSON HTTPクライアントは30秒、応答上限は32MiB。サービス固有の制限とbase64等の符号化により実際の値は小さくなる。S3/GCSは符号化済みレコードが32MiBを超える場合に書き込みを事前拒否する。エラーには認証URL・リモート本文・資格情報を含めない。
 
-既定テーブルは互換性のためururidb_recordsを使う。Config.Tableで別名を指定できる。列はcollection、id、payload、tokenで、主キーは(collection, id)。payloadはbase64文字列。idにはSQLiteのBINARYまたはPostgreSQLのC collationを指定する。既存スキーマを用意する場合も比較規則を揃える。テーブル名は単一の安全な識別子、値はパラメータとして扱う。
+## AWSとS3互換性
 
-D1にはAccountID、DatabaseID、Tokenを指定し、SQLite用の条件付きSQLをREST query endpointへ送る。AutoMigrateも使える。公式RESTは管理用途向けでAPIレート制限があり、アプリ用Workerゲートウェイのデプロイはこのライブラリでは行わない。[Cloudflareの説明](https://developers.cloudflare.com/d1/tutorials/build-an-api-to-access-d1/)
+既定認証は環境変数、web identity/STS、コンテナ資格情報、IMDSv2の順。EKS IRSA、ECS、EKS Pod Identity、EC2を扱い、一時資格情報は期限前に更新する。web identity tokenとコンテナ認証token fileは更新時に再取得する。IMDSv1へ自動フォールバックしない。metadataは既定で5秒、認証HTTPはredirectを追わない。profile・SSOはProviderかAuthorizeを注入する。
 
-bboltはファイルロックを使うローカルバックエンド。同じDBを複数Lambdaから共有する用途にはリモートバックエンドを選ぶ。標準Openタイムアウトは1秒、ファイルモードは0600。
+Regionは明示値、AWS_REGION、AWS_DEFAULT_REGION、us-east-1の順。R2はauto。AWS S3の既定endpointでは適切なbucket名ならvirtual-hostedを使い、ドット入りはTLSのためpath-style。独自endpointとR2はpath-styleを既定とし、AddressStyleで選べる。directory bucketやmultipart uploadは対象外。
 
-## 競合・削除・一覧
+独自endpointのOpenは一時オブジェクトでIf-None-Match・If-Match・並行CASを検査し、条件を無視する場合はErrUnsupportedで停止する。DELETE条件の非対応・無視は検出して墓標を選ぶ。検査後は一時キーを掃除し、成功した検査で掃除に失敗した場合もOpenを成功させない。検査用キーの作成が失敗した場合は既存キーを削除しない。必要な読取・書込・削除権限を与える。AWSへもVerifyConditions: trueで実施できる。有限のprobeでサービスの全保証を証明するものではなく、s3.Verify・r2.Verifyでも実行結果を取得できる。
 
-共通処理は読み取り時のrevisionを比較し、最後の書き込みでもバックエンドのETag・generation・updateTime・token条件を指定する。プロセス内の比較だけに安全性を依存しない。
+## 大きな文書・依存・拡張
 
-Deleteは条件付き書き込みでtombstoneを保存する。削除・再作成の挙動を揃えるため、ローカルDBでも物理削除しない。tombstoneで保存件数は増え続ける。物理GCは未実装で、稼働中のwriterと競合する直接削除は行わない。
+s3.OpenBlobs・r2.OpenBlobs・gcs.OpenBlobsは別コレクションで生の文書を扱う。Blob.Insertは変更しない文書を条件付き作成し、入力を一時ファイルへ退避する。SigV4もio.Copyでハッシュを計算し、文書全体をメモリへ読み込まない。一時ファイルは終了時に削除する。Blob.OpenのReaderは呼び出し側がCloseする。既定timeoutは5分で、Client注入で変更できる。レコード用32MiB上限は通らない。Blobのnative ETagは内容が同じだと再利用され得るため、新しいIDを発行し、参照を小さなレコードに置く。複数キーのトランザクションは提供しない。
 
-UUIDv7はプロセス内で単調増加させ、時計が戻っても順序を保つ。独立プロセス間では時刻と乱数による順で、厳密な生成順・コミット順ではない。IDは小文字のcanonical形式。
+コアは標準ライブラリのみ。ルートgo.modはbboltとその間接依存だけを持つ。mattn/go-sqlite3はintegration/go.modへ分離し、実SQLiteとD1のテストをそこで走らせる。build tagはstatic importをまとめ、依存moduleの隔離には使わない。
 
-カーソルはドライバ・コレクションと最後の走査キーを持ち、HTTPでは接続先、bboltではファイルパスも識別に使う。SQLでは接続先DB自体は識別しないため、別DBのカーソルを流用しない。値の更新で順序は変わらない。削除やtombstoneにより、カーソルがあっても次ページが空になる場合がある。過去のカーソルより前に追加されたIDは現在の走査に現れない。昇順のみで、ページ間スナップショットやoffsetは提供しない。
+外部ドライバはRawStoreとRegisterで接続できる。adapter.Backendは元のRead/Write/Keys/Close契約を維持する。任意のItemWriter・Scanner・Deleter・CollectionTransportを追加すると、tokenを返す書込、値付き一覧、物理削除、接続共有に対応できる。能力がない場合は安全な読み直し・墓標・単一コレクションの経路を使う。公開の型付きAPIはOpen/Wrap/adapter.Newに統一し、コレクション名をその都度指定する公開ビューは設けない。
 
-## Cloudflare KV
+## 検証
 
-KVにはCASがないため、共通StoreのInsert・Update・DeleteはErrUnsupported。CapabilitiesのConditionalMutationsとStrongReadsもfalseになる。
+実bbolt、integration moduleの実SQLite、各クラウドの独立HTTP fixtureでCRUD・CAS・ABA・並行クライアント・ページングを検証する。追加したテストは複数の名前付き型、5つのbbolt bucket、参照カウント、2000件から10件への削除とRead回数、バイナリ形式の実バイト数、結果不明の照合、名前キー順、認証チェーン、S3互換性、34MiBのストリーミングを確認する。
 
-無条件操作を使う場合は型付きStore[T]のSet・Removeを使う。登録経由でも同じメソッドを利用でき、他のドライバではErrUnsupportedになる。低水準のcfkv.OpenRawにもバイト列版を残す。Setは作成または上書き、Removeは無条件削除で、revisionを条件付き更新には使えない。地域間の可視性遅延や競合上書きを許容する用途に限る。[公式の整合性説明](https://developers.cloudflare.com/kv/api/write-key-value-pairs/#concurrent-writes-to-the-same-key)
-
-KVのREST一覧はprefixから順に走査する。共通カーソル以降を取得するため以前のキーを再走査する場合があり、大規模な一覧向けに最適化していない。
-
-## 拡張と検証範囲
-
-独自バックエンドはRawStoreを実装してfactoryをRegisterする。原子的なKVSなら公開adapterパッケージで共通のレコード処理を再利用できる。BackendのRead・Write・Keys・Closeを実装し、Writeの空トークンはcreate-if-absent、非空トークンはCASとして原子的に評価する。Keysは対象collection/のキーを指定位置より後から昇順に返す。
-
-共通conformance suiteは型付きJSONのCRUDと競合、低水準のbinary値、重複insert、revision競合、削除後の再作成、逆順insert後のID順一覧、tombstoneをまたぐページング、並行クライアント、引数・context・Closeを確認する。bboltは再オープン、SQLは実SQLite、D1のHTTP fixtureも裏側で実SQLiteを使う。
-
-S3・R2・DynamoDB・GCS・Firestore・Realtime Databaseは、条件を原子的に評価するローカルHTTP fixtureで検証する。S3経路では別プロセス2個の競合も確認する。SigV4は[AWS公式の既知ベクトル](https://docs.aws.amazon.com/AmazonS3/latest/developerguide/sig-v4-header-based-auth.html)と照合する。KVは能力不足の明示と無条件操作を検証する。
-
-scripts/check-builds.pyは各タグで実行ファイルを作り、登録ドライバの集合、コアの依存分離、CGOなしのLinux/arm64クラウドprofileビルドを確認する。
-
-実クラウド、実PostgreSQL、IAM権限、性能・料金・コールドスタートは未検証。永続形式の移行機構も未実装で、公開APIと形式を固定する前の初期実装として扱う。
+検証の実行結果は[検証履歴](implementation-validation.md)。実クラウド・実PostgreSQL・IAM・本番負荷・コストは未検証。

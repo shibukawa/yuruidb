@@ -56,12 +56,17 @@ func NewID() (string, error) {
 	s := hex.EncodeToString(b[:])
 	return s[:8] + "-" + s[8:12] + "-" + s[12:16] + "-" + s[16:20] + "-" + s[20:], nil
 }
+
+// ValidateID accepts a portable ASCII name of 1..256 bytes. Slash and URL
+// metacharacters are excluded. IDs retain case and are ordered bytewise.
 func ValidateID(id string) error {
-	if len(id) != 36 || id[8] != '-' || id[13] != '-' || id[18] != '-' || id[23] != '-' || id[14] != '7' || !strings.ContainsRune("89ab", rune(id[19])) || strings.ToLower(id) != id {
-		return fmt.Errorf("%w: canonical lowercase UUIDv7 required", ErrInvalid)
+	if len(id) == 0 || len(id) > 256 || id == "." || id == ".." || (len(id) >= 4 && strings.HasPrefix(id, "__") && strings.HasSuffix(id, "__")) {
+		return fmt.Errorf("%w: ID length must be 1..256 and not a path component", ErrInvalid)
 	}
-	if _, err := hex.DecodeString(strings.ReplaceAll(id, "-", "")); err != nil {
-		return fmt.Errorf("%w: malformed UUID", ErrInvalid)
+	for _, c := range id {
+		if !(c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || c == '_' || c == '-' || c == '.') {
+			return fmt.Errorf("%w: ID must contain only ASCII letters, digits, '.', '_' or '-'", ErrInvalid)
+		}
 	}
 	return nil
 }

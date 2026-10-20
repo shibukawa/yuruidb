@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"github.com/shibukawa/yuruidb"
 	"github.com/shibukawa/yuruidb/auth"
+	"github.com/shibukawa/yuruidb/blob"
 	"github.com/shibukawa/yuruidb/internal/httpx"
 	"github.com/shibukawa/yuruidb/internal/recordstore"
 	"net/http"
@@ -69,13 +70,30 @@ func (t *transport) Read(ctx context.Context, key string) (recordstore.Item, err
 	return recordstore.Item{Data: r.Body, Token: token}, nil
 }
 func (t *transport) Write(ctx context.Context, key string, b []byte, expected string) error {
+	_, err := t.WriteItem(ctx, key, b, expected)
+	return err
+}
+func (t *transport) WriteItem(ctx context.Context, key string, b []byte, expected string) (string, error) {
+	if len(b) > httpx.MaxResponse {
+		return "", fmt.Errorf("%w: encoded record exceeds 32 MiB; use OpenBlobs", yuruidb.ErrInvalid)
+	}
+
 	if expected == "" {
 		expected = "0"
 	}
 	q := url.Values{"uploadType": {"media"}, "name": {key}, "ifGenerationMatch": {expected}}
 	h := http.Header{"Content-Type": {"application/json"}}
-	_, err := t.client.Do(ctx, "POST", t.endpoint+"/upload/storage/v1/b/"+url.PathEscape(t.bucket)+"/o?"+q.Encode(), b, h, true)
-	return err
+	response, err := t.client.Do(ctx, "POST", t.endpoint+"/upload/storage/v1/b/"+url.PathEscape(t.bucket)+"/o?"+q.Encode(), b, h, true)
+	if err != nil {
+		return "", err
+	}
+	var out struct {
+		Generation string `json:"generation"`
+	}
+	if json.Unmarshal(response.Body, &out) != nil || out.Generation == "" {
+		return "", fmt.Errorf("%w: missing GCS generation", yuruidb.ErrOutcomeUnknown)
+	}
+	return out.Generation, nil
 }
 func (t *transport) Keys(ctx context.Context, after string, n int) ([]string, bool, error) {
 	if n > 999 {
@@ -125,11 +143,53 @@ func (t *transport) Keys(ctx context.Context, after string, n int) ([]string, bo
 }
 func (t *transport) Close() error { return nil }
 
-// Open opens a JSON-typed collection using this driver.
-func Open[T any](ctx context.Context, c Config) (*yuruidb.Store[T], error) {
+// Open opens a connection. Bind data types to collection names before use.
+func Open(ctx context.Context, c Config) (*yuruidb.Store, error) {
 	raw, err := OpenRaw(ctx, c)
 	if err != nil {
 		return nil, err
 	}
-	return yuruidb.Wrap[T](raw), nil
+	return yuruidb.Wrap(raw), nil
+}
+
+func (t *transport) ForCollection(ctx context.Context, name string) (recordstore.Transport, error) {
+	copy := *t
+	copy.prefix = name + "/"
+	return &copy, nil
+}
+
+func (t *transport) Delete(ctx context.Context, key, expected string) error {
+	_, err := t.client.Do(ctx, "DELETE", t.base()+"/"+url.PathEscape(key)+"?"+url.Values{"ifGenerationMatch": {expected}}.Encode(), nil, nil, true)
+	return err
+}
+
+// OpenBlobs opens a separate collection for immutable streaming documents.
+func OpenBlobs(ctx context.Context, c Config) (*blob.Store, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if err := yuruidb.ValidateCollection(c.Collection); err != nil {
+		return nil, err
+	}
+	if c.Bucket == "" {
+		return nil, yuruidb.ErrInvalid
+	}
+	if c.Endpoint == "" {
+		c.Endpoint = "https://storage.googleapis.com"
+	}
+	endpoint, err := httpx.Endpoint(c.Endpoint)
+	if err != nil {
+		return nil, err
+	}
+	authorize := c.Authorize
+	if authorize == nil {
+		authorize = auth.Bearer(c.Token)
+	}
+	location := func(id string) string {
+		return endpoint + "/storage/v1/b/" + url.PathEscape(c.Bucket) + "/o/" + url.PathEscape(c.Collection+"/"+id) + "?alt=media"
+	}
+	upload := func(id string) string {
+		return endpoint + "/upload/storage/v1/b/" + url.PathEscape(c.Bucket) + "/o?" + url.Values{"uploadType": {"media"}, "name": {c.Collection + "/" + id}, "ifGenerationMatch": {"0"}}.Encode()
+	}
+	return blob.NewHTTP(blob.HTTPConfig{Client: c.Client, Authorize: authorize, ObjectURL: location, UploadURL: upload, Generation: true, ConditionalDelete: true})
 }

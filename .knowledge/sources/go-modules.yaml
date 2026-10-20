@@ -6,6 +6,8 @@ location:
   selection: filesystem
   include:
   - go.mod
+  - integration/go.mod
 watch:
 - go.mod
+- integration/go.mod
 depends_on: []

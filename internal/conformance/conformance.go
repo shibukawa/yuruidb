@@ -29,14 +29,20 @@ func Run(t *testing.T, open Open) {
 			Count int    `json:"count"`
 		}
 		rawA, rawB := open(t)
-		a, b := yuruidb.Wrap[data](rawA), yuruidb.Wrap[data](rawB)
+		a, b := yuruidb.Wrap(rawA), yuruidb.Wrap(rawB)
+		if err := a.Bind[data]("items"); err != nil {
+			t.Fatal(err)
+		}
+		if err := b.Bind[data]("items"); err != nil {
+			t.Fatal(err)
+		}
 		ctx := context.Background()
 		id := ID(t)
 		r, err := a.Insert(ctx, id, data{Text: "JSON 日本語", Count: 1})
 		if err != nil {
 			t.Fatal(err)
 		}
-		got, err := b.Get(ctx, id)
+		got, err := b.Get[data](ctx, id)
 		if err != nil || got != r || got.ID() != id {
 			t.Fatalf("typed get: %+v vs %+v; %v", got, r, err)
 		}
@@ -47,14 +53,14 @@ func Run(t *testing.T, open Open) {
 		if _, err := a.Update(ctx, id, data{}, r.Revision()); !errors.Is(err, yuruidb.ErrConflict) {
 			t.Fatalf("typed stale revision: %v", err)
 		}
-		page, err := a.List(ctx, yuruidb.ListOptions{Limit: 1})
+		page, err := a.List[data](ctx, yuruidb.ListOptions{Limit: 1})
 		if err != nil || len(page.Records) != 1 || page.Records[0] != updated {
 			t.Fatalf("typed list: %+v %v", page, err)
 		}
-		if err := a.Delete(ctx, id, updated.Revision()); err != nil {
+		if err := a.Delete[data](ctx, id, updated.Revision()); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := b.Get(ctx, id); !errors.Is(err, yuruidb.ErrNotFound) {
+		if _, err := b.Get[data](ctx, id); !errors.Is(err, yuruidb.ErrNotFound) {
 			t.Fatalf("typed deleted: %v", err)
 		}
 	})
@@ -232,10 +238,31 @@ func Run(t *testing.T, open Open) {
 			t.Fatalf("successful inserts: %d", wins.Load())
 		}
 	})
+
+	t.Run("PortableNames", func(t *testing.T) {
+		a, b := open(t)
+		ctx := context.Background()
+		for _, id := range []string{"host.local", "printer-1", "2", "10", "A", "_meta"} {
+			if _, err := a.Insert(ctx, id, []byte(id)); err != nil {
+				t.Fatal(err)
+			}
+		}
+		page, err := b.List(ctx, yuruidb.ListOptions{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		ids := []string{}
+		for _, r := range page.Records {
+			ids = append(ids, r.ID)
+		}
+		if fmt.Sprint(ids) != "[10 2 A _meta host.local printer-1]" {
+			t.Fatal(ids)
+		}
+	})
 	t.Run("ValidationCancellation", func(t *testing.T) {
 		a, _ := open(t)
 		ctx := context.Background()
-		if _, err := a.Insert(ctx, "not-a-uuid", nil); !errors.Is(err, yuruidb.ErrInvalid) {
+		if _, err := a.Insert(ctx, "bad/id", nil); !errors.Is(err, yuruidb.ErrInvalid) {
 			t.Fatal(err)
 		}
 		id := ID(t)

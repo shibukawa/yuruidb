@@ -121,7 +121,7 @@ assertions:
   authority: authored
   basis:
   - path: docs/requirements-input.md
-    input_hash: 401edd4f59abce29df56c883931c4409a65443dabfd87aa8424ae9aa8cc2cd23
+    input_hash: d9795855517cf2f1321c52cd5e78792aeaf8a5393a028050011a8e07071ee115
   evidence:
     input_path: docs/requirements-input.md
 open_questions:

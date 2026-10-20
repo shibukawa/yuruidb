@@ -49,3 +49,33 @@ store_test.goでは実bboltの型付き再オープンとページング、入�
 Record[T]のid・revisionを非公開にし、ID()・Revision()で取得する。Dataは公開のまま維持し、Updateは新しいRecordを返す。JSONのid・revision・dataはMarshalJSON/UnmarshalJSONで維持する。JSON復元はRecord全体の置き換えで、復元エラー時には元の値を変更しない。ドライバ用RawRecordのフィールドは実装者が構築できるよう公開を維持する。
 
 Go 1.26.0と1.27.0でgo test -race ./...が成功。Go 1.26.0でgo vet ./...とgo run ./examples/basicも成功した。record_test.goで公開の編集可能フィールドがDataのみであること、更新前Recordのメタデータを保持すること、JSON往復とJSON復元失敗時の元データ保持を検証した。各バックエンドの型付きconformanceとKVの型付き操作もアクセサ版で通過した。
+
+## Go 1.27・複数コレクションとbdfフィードバック対応
+
+2026-10-20、Go 1.27.0、macOS/arm64で確認。最低バージョンを1.27.0へ上げ、Open/Storeは接続単位、Bind[T]とGet[T]等のメソッド型引数でコレクションを選ぶ形へ変更した。Done・Waitingを別の名前付き型として登録でき、公開Collectionビューは設けない。
+
+| 検証 | 結果 | 範囲 |
+| --- | --- | --- |
+| sh scripts/check-all.sh | 成功 | 以下のrace・vet・integration・タグビルド・実行例を一括実行 |
+| go test -race ./... | 成功 | 全ルートテスト。実bboltとクラウドHTTP fixture、メソッド型引数、CAS/ABA、結果照合 |
+| go vet ./... | 成功 | ルートmoduleの静的検査 |
+| integration: go test -race ./... / go vet ./... | 成功 | 別moduleに分離した実SQLiteとD1 fixture |
+| scripts/check-builds.py | 成功 | 9タグ構成、コア依存分離、CGOなしLinux/arm64のクラウド4構成 |
+| examples/basic | 成功 | Bind・メソッド型引数による実bboltのCRUD |
+| CGO_ENABLED=0 go test ./... | 成功 | ルートmodule全体にcgo依存がないことを確認 |
+
+multi_collection_test.goでは1つのbboltファイルでjobs・done・meta・printers・trustを同時に使い、同じIDの分離、Tと*T、別所有者のClose、再オープン、型再登録の拒否を確認した。multi_remote_test.goはS3/R2/GCS/DynamoDB/Firestore/Realtime Databaseで同じ型分離を検証する。
+
+recordstoreの呼び出し回数テストでは、2000件作成して1990件削除した状態で残る項目が10件、Insert/削除でReadが0回、一覧がScan 1回・Read 0回、Updateも事前Read 0回であることを確認した。これは汎用レコード処理の回数の検証で、実サービスのレイテンシや課金測定ではない。
+
+応答喪失のテストは、成功後の読み直しによる復旧、読み直しも失敗した場合のMutationError、後からのMatchesRevisionによる確認、後続更新済みの場合の不一致を検証した。墓標だけの外部transportへのフォールバック、既存墓標の掃除、掃除と再作成の競合、物理削除後の古い更新・削除も確認した。
+
+未公開のため旧形式の互換処理と移行手順は設けず、bboltのバイナリ形式を直接検証した。1MiBのpayloadに対する保存値のオーバーヘッドは128バイト未満である。ファイルの割当単位・compaction・運用中の容量推移のベンチマークではない。
+
+S3互換性のテストは条件を無視するendpointの拒否、DELETE非対応時の墓標フォールバック、AWS地域とURL形式を確認した。HTTPの試験は一時応答の再試行、再署名、同じ本文と条件の維持、応答不明後の競合、無条件変更を再送しないことを確認した。
+
+AWS認証は環境変数の優先、コンテナ/Pod Identityのtoken file、期限前更新とキャッシュ、web identity/STS、IMDSv2、地域の優先順位をローカルfixtureで確認した。Blobは34MiBの署名付き送受信とハッシュ一致、重複作成の拒否、条件付き削除、GCS generationを確認した。
+
+既存のHTTP fixtureは条件付き削除・値付き一覧の独立した処理へ拡張した。クラウド資格情報・実リソースを使う検証は行っておらず、実クラウド・実PostgreSQL・IAM・サービスの全互換性・本番負荷とコストは未検証。S3互換性probeも有限の観測である。
+
+通常sandboxではローカルlistenとGoの外部キャッシュ書き込みに制約があるため、ローカルテスト用ポートとキャッシュ書き込みを許可した実行で最終チェックを完了した。

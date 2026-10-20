@@ -1,0 +1,48 @@
+id: decision:typed-collection-routing
+type: decision
+title: Use defined Go types to route generic methods to collections
+lifecycle: accepted
+authority: authored
+summary: A Go 1.27 Store owns one backend connection; Done and Waiting are distinct defined types bound to stable
+  collection names.
+facts:
+  api:
+  - Open
+  - Store.Bind[T]
+  - Store.Get[T]
+  - Store.List[T]
+  - Store.Delete[T]
+  type_identity: type Done Job and type Waiting Job are distinct; type Done = Job is an alias. Pointer/value forms
+    share one binding.
+  ownership: Store.Close owns the connection; internal collection views borrow it. bbolt shares connections per
+    normalized path across owners.
+  physical_names: Explicit Bind names survive Go type or package renames.
+  public_collection_view: Not provided; one logical type selects one collection.
+  limitations:
+  - JSON compatibility across processes is the application responsibility
+  - Defined types do not inherit methods
+  - No transaction spans jobs-to-done movement
+  prerelease: User explicitly excluded migration steps because no version has been published.
+relations:
+- relation: realizes
+  to: requirement:record-crud
+- relation: implemented_by
+  to: implementation:initial-library
+verification:
+  multi-collection:
+    state: passed
+    method: integration
+    authority: observed
+    test: sh scripts/check-all.sh
+    basis:
+    - path: store.go
+      input_hash: 67c6715d4c2d21c1cac5b2312b4dafc87b25916cc0f9727af6114c0b95292e0b
+    - path: multi_collection_test.go
+      input_hash: ff575466ac1c25760a8708ce34a64343db0df936d106214df2abb21d66ea8104
+    - path: multi_remote_test.go
+      input_hash: 089cc955dad39677f7f3e79b93e89e1cae31bc7a756afddb7d2383bef0cc7fe8
+    - path: docs/implementation-validation.md
+      input_hash: 56d9658830444f2cdd7923b3f5bb63ac534ec2a4bf2d2d7fd72e3778f753eb05
+    evidence:
+      input_path: docs/implementation-validation.md
+      locator: Go 1.27・複数コレクションとbdfフィードバック対応

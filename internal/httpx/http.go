@@ -9,8 +9,10 @@ import (
 	"github.com/shibukawa/yuruidb"
 	"github.com/shibukawa/yuruidb/auth"
 	"io"
+	"math/rand/v2"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -20,6 +22,8 @@ const MaxResponse = 32 << 20
 type Client struct {
 	HTTP *http.Client
 	Auth auth.Authorizer
+	// MaxAttempts defaults to three; a negative value disables retries.
+	MaxAttempts int
 }
 type Response struct {
 	Body   []byte
@@ -38,7 +42,7 @@ func Endpoint(value string) (string, error) {
 	}
 	return strings.TrimRight(value, "/"), nil
 }
-func (c Client) Do(ctx context.Context, method, target string, body []byte, headers http.Header, mutation bool) (Response, error) {
+func (c Client) doOnce(ctx context.Context, method, target string, body []byte, headers http.Header, mutation bool) (Response, error) {
 	var result Response
 	if err := ctx.Err(); err != nil {
 		return result, err
@@ -123,4 +127,70 @@ func (c Client) JSON(ctx context.Context, method, target string, input, output a
 		}
 	}
 	return nil
+}
+
+// Do replays the identical request, with fresh authorization, only for transient
+// responses. Conditional mutation retries never adopt a newer revision.
+func (c Client) Do(ctx context.Context, method, target string, body []byte, headers http.Header, mutation bool) (Response, error) {
+	attempts := c.MaxAttempts
+	if attempts == 0 {
+		attempts = 3
+	}
+	if attempts < 0 {
+		attempts = 1
+	}
+	u, _ := url.Parse(target)
+	conditional := headers.Get("If-Match") != "" || headers.Get("If-None-Match") != ""
+	if u != nil {
+		q := u.Query()
+		conditional = conditional || q.Get("ifGenerationMatch") != "" || q.Get("currentDocument.updateTime") != "" || q.Get("currentDocument.exists") != ""
+	}
+	targetOp := headers.Get("X-Amz-Target")
+	conditional = conditional || strings.HasSuffix(targetOp, ".PutItem") || strings.HasSuffix(targetOp, ".DeleteItem")
+	if mutation && !conditional {
+		attempts = 1
+	}
+	ambiguous := false
+	var response Response
+	var err error
+	for attempt := 0; attempt < attempts; attempt++ {
+		response, err = c.doOnce(ctx, method, target, body, headers, mutation)
+		if err == nil {
+			return response, nil
+		}
+		ambiguous = ambiguous || errors.Is(err, yuruidb.ErrOutcomeUnknown)
+		var remote *Error
+		if !errors.As(err, &remote) || (remote.Status != 429 && remote.Status != 500 && remote.Status != 502 && remote.Status != 503 && remote.Status != 504) || attempt+1 == attempts {
+			break
+		}
+		delay := time.Duration(25*(1<<min(attempt, 5))) * time.Millisecond
+		delay += time.Duration(rand.Int64N(int64(delay) + 1))
+		if value := response.Header.Get("Retry-After"); value != "" {
+			if seconds, e := strconv.Atoi(value); e == nil && seconds >= 0 {
+				if seconds > 2 {
+					break
+				}
+				delay = time.Duration(seconds) * time.Second
+			} else if date, e := http.ParseTime(value); e == nil {
+				delay = max(time.Until(date), 0)
+			}
+			if delay > 2*time.Second {
+				break
+			} // do not retry before the server's minimum
+		}
+		timer := time.NewTimer(delay)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			if ambiguous && mutation {
+				return response, errors.Join(yuruidb.ErrOutcomeUnknown, ctx.Err())
+			}
+			return response, ctx.Err()
+		case <-timer.C:
+		}
+	}
+	if ambiguous && mutation {
+		err = errors.Join(yuruidb.ErrOutcomeUnknown, err)
+	}
+	return response, err
 }
