@@ -3,6 +3,7 @@
 package protocoltest
 
 import (
+	"bytes"
 	"encoding/base64"
 	"encoding/json"
 	"encoding/xml"
@@ -16,6 +17,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 )
 
 type item struct {
@@ -104,14 +106,18 @@ func (s *Server) s3(w http.ResponseWriter, r *http.Request) {
 			XMLName   xml.Name `xml:"ListBucketResult"`
 			Truncated bool     `xml:"IsTruncated"`
 			Contents  []struct {
-				Key string `xml:"Key"`
+				Key  string `xml:"Key"`
+				ETag string `xml:"ETag"`
+				Size int64  `xml:"Size"`
 			} `xml:"Contents"`
 		}
 		out.Truncated = more
 		for _, key := range keys {
 			out.Contents = append(out.Contents, struct {
-				Key string `xml:"Key"`
-			}{key})
+				Key  string `xml:"Key"`
+				ETag string `xml:"ETag"`
+				Size int64  `xml:"Size"`
+			}{key, `"` + s.items[key].token + `"`, int64(len(s.items[key].data))})
 		}
 		xml.NewEncoder(w).Encode(out)
 		return
@@ -125,7 +131,7 @@ func (s *Server) s3(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		w.Header().Set("ETag", `"`+v.token+`"`)
-		w.Write(v.data)
+		http.ServeContent(w, r, "", time.Time{}, bytes.NewReader(v.data))
 	case "PUT":
 		expected := strings.Trim(r.Header.Get("If-Match"), `"`)
 		if expected == "" && r.Header.Get("If-None-Match") != "*" {
@@ -179,7 +185,7 @@ func (s *Server) gcs(w http.ResponseWriter, r *http.Request) {
 	case r.Method == "DELETE":
 		key := strings.SplitN(r.URL.Path, "/o/", 2)[1]
 		old, exists := s.items[key]
-		if !exists || q.Get("ifGenerationMatch") != old.token {
+		if !exists || (q.Get("ifGenerationMatch") != "" && q.Get("ifGenerationMatch") != old.token) {
 			w.WriteHeader(412)
 			return
 		}
@@ -193,12 +199,16 @@ func (s *Server) gcs(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		w.Header().Set("X-Goog-Generation", v.token)
-		w.Write(v.data)
+		if q.Get("ifGenerationMatch") != "" && q.Get("ifGenerationMatch") != v.token {
+			w.WriteHeader(412)
+			return
+		}
+		http.ServeContent(w, r, "", time.Time{}, bytes.NewReader(v.data))
 	default:
 		keys, more := s.keys(q.Get("prefix"), q.Get("startOffset"), number(q.Get("maxResults"), 1000), true)
 		items := []map[string]string{}
 		for _, k := range keys {
-			items = append(items, map[string]string{"name": k})
+			items = append(items, map[string]string{"name": k, "generation": s.items[k].token, "size": fmt.Sprint(len(s.items[k].data))})
 		}
 		out := map[string]any{"items": items}
 		if more {
@@ -208,7 +218,7 @@ func (s *Server) gcs(w http.ResponseWriter, r *http.Request) {
 			keys, more = s.keys(q.Get("prefix"), strings.TrimPrefix(token, "after:"), number(q.Get("maxResults"), 1000), false)
 			items = []map[string]string{}
 			for _, k := range keys {
-				items = append(items, map[string]string{"name": k})
+				items = append(items, map[string]string{"name": k, "generation": s.items[k].token, "size": fmt.Sprint(len(s.items[k].data))})
 			}
 			out = map[string]any{"items": items}
 			if more {

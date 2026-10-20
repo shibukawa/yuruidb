@@ -112,7 +112,7 @@ func (t *transport) WriteItem(ctx context.Context, key string, b []byte, expecte
 				Status string `json:"status"`
 			} `json:"error"`
 		}
-		if json.Unmarshal(response.Body, &failure) == nil && failure.Error.Status == "FAILED_PRECONDITION" {
+		if !errors.Is(err, yuruidb.ErrOutcomeUnknown) && json.Unmarshal(response.Body, &failure) == nil && failure.Error.Status == "FAILED_PRECONDITION" {
 			return "", errors.Join(yuruidb.ErrConflict, err)
 		}
 	}
@@ -189,7 +189,7 @@ func (t *transport) Delete(ctx context.Context, key, expected string) error {
 				Status string `json:"status"`
 			} `json:"error"`
 		}
-		if json.Unmarshal(response.Body, &remote) == nil && remote.Error.Status == "FAILED_PRECONDITION" {
+		if !errors.Is(err, yuruidb.ErrOutcomeUnknown) && json.Unmarshal(response.Body, &remote) == nil && remote.Error.Status == "FAILED_PRECONDITION" {
 			return errors.Join(yuruidb.ErrConflict, err)
 		}
 	}

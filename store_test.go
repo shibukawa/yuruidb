@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"math"
 	"path/filepath"
 	"reflect"
@@ -19,6 +20,17 @@ type note struct {
 	Text   string            `json:"text"`
 	Tags   []string          `json:"tags,omitempty"`
 	Labels map[string]string `json:"labels,omitempty"`
+}
+
+func TestBackupUnsupported(t *testing.T) {
+	s, err := memory.Open(context.Background(), memory.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	if err := s.Backup(context.Background(), io.Discard); !errors.Is(err, yuruidb.ErrUnsupported) {
+		t.Fatal(err)
+	}
 }
 
 func nextID(t *testing.T) string {

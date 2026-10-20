@@ -3,6 +3,7 @@ module github.com/shibukawa/yuruidb/integration
 go 1.27.0
 
 require (
+	github.com/lib/pq v1.12.3
 	github.com/shibukawa/yuruidb v0.0.0
 	modernc.org/sqlite v1.60.1
 )

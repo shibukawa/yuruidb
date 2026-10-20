@@ -12,6 +12,8 @@ import (
 	"github.com/shibukawa/yuruidb/internal/recordstore"
 	"net/http"
 	"net/url"
+	"strconv"
+	"strings"
 )
 
 type Config struct {
@@ -191,5 +193,51 @@ func OpenBlobs(ctx context.Context, c Config) (*blob.Store, error) {
 	upload := func(id string) string {
 		return endpoint + "/upload/storage/v1/b/" + url.PathEscape(c.Bucket) + "/o?" + url.Values{"uploadType": {"media"}, "name": {c.Collection + "/" + id}, "ifGenerationMatch": {"0"}}.Encode()
 	}
-	return blob.NewHTTP(blob.HTTPConfig{Client: c.Client, Authorize: authorize, ObjectURL: location, UploadURL: upload, Generation: true, ConditionalDelete: true})
+	t := &transport{httpx.Client{HTTP: c.Client, Auth: authorize}, endpoint, c.Bucket, c.Collection + "/"}
+	return blob.NewHTTP(blob.HTTPConfig{Client: c.Client, Authorize: authorize, ObjectURL: location, UploadURL: upload, Generation: true, ConditionalDelete: true, List: t.listBlobs})
+}
+
+func (t *transport) listBlobs(ctx context.Context, after string, n int) ([]blob.Metadata, bool, error) {
+	q := url.Values{"prefix": {t.prefix}, "maxResults": {fmt.Sprint(min(n+1, 1000))}}
+	if after != "" {
+		q.Set("startOffset", t.prefix+after)
+	}
+	items := []blob.Metadata{}
+	seen := map[string]bool{}
+	for {
+		r, err := t.client.Do(ctx, "GET", t.base()+"?"+q.Encode(), nil, nil, false)
+		if err != nil {
+			return nil, false, err
+		}
+		var out struct {
+			Next  string                                    `json:"nextPageToken"`
+			Items []struct{ Name, Generation, Size string } `json:"items"`
+		}
+		if json.Unmarshal(r.Body, &out) != nil {
+			return nil, false, fmt.Errorf("yuruidb: malformed GCS blob listing")
+		}
+		for _, item := range out.Items {
+			if !strings.HasPrefix(item.Name, t.prefix) {
+				return nil, false, fmt.Errorf("yuruidb: foreign blob key")
+			}
+			id := strings.TrimPrefix(item.Name, t.prefix)
+			if id <= after {
+				continue
+			}
+			size, err := strconv.ParseInt(item.Size, 10, 64)
+			if err != nil {
+				return nil, false, fmt.Errorf("yuruidb: invalid GCS blob size")
+			}
+			items = append(items, blob.Metadata{ID: id, Revision: item.Generation, Size: size})
+		}
+		if len(items) >= n || out.Next == "" {
+			more := len(items) > n || out.Next != ""
+			return items[:min(n, len(items))], more, nil
+		}
+		if seen[out.Next] {
+			return nil, false, fmt.Errorf("yuruidb: repeated GCS page token")
+		}
+		seen[out.Next] = true
+		q.Set("pageToken", out.Next)
+	}
 }

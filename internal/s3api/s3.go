@@ -15,6 +15,7 @@ import (
 	"net/url"
 	"strings"
 	"sync"
+	"time"
 )
 
 type Config struct {
@@ -129,22 +130,24 @@ func (t *transport) verify(ctx context.Context) (result error) {
 	if err != nil {
 		return err
 	}
-	key := t.prefix + "__yuruidb_probe_" + id
+	key := ".yuruidb-probes/" + id
 	owned := false
 	defer func() {
 		if !owned {
 			return
 		}
-		_, err := t.client.Do(ctx, "DELETE", t.base+"/"+key, nil, nil, true)
+		cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+		defer cancel()
+		_, err := t.client.Do(cleanupCtx, "DELETE", t.base+"/"+key, nil, nil, true)
 		if result == nil && err != nil {
 			result = fmt.Errorf("yuruidb: could not clean up S3 condition probe: %w", err)
 		}
 	}()
 	first, err := t.WriteItem(ctx, key, []byte("probe-initial-"+id), "")
+	owned = err == nil || errors.Is(err, yuruidb.ErrOutcomeUnknown)
 	if err != nil {
 		return err
 	}
-	owned = true
 	if first == "" {
 		return fmt.Errorf("%w: S3 probe lacks ETag", yuruidb.ErrUnsupported)
 	}
@@ -287,5 +290,35 @@ func OpenBlobs(ctx context.Context, c Config, kind string) (*blob.Store, error) 
 		return nil, err
 	}
 	location := func(id string) string { return t.base + "/" + t.prefix + id }
-	return blob.NewHTTP(blob.HTTPConfig{Client: c.Client, Authorize: t.client.Auth, ObjectURL: location, UploadURL: location, ConditionalDelete: t.conditionalDelete})
+	return blob.NewHTTP(blob.HTTPConfig{Client: c.Client, Authorize: t.client.Auth, ObjectURL: location, UploadURL: location, ConditionalDelete: t.conditionalDelete, List: t.listBlobs})
+}
+
+func (t *transport) listBlobs(ctx context.Context, after string, n int) ([]blob.Metadata, bool, error) {
+	q := url.Values{"list-type": {"2"}, "prefix": {t.prefix}, "max-keys": {fmt.Sprint(n)}}
+	if after != "" {
+		q.Set("start-after", t.prefix+after)
+	}
+	r, err := t.client.Do(ctx, "GET", t.base+"?"+q.Encode(), nil, nil, false)
+	if err != nil {
+		return nil, false, err
+	}
+	var out struct {
+		Truncated bool `xml:"IsTruncated"`
+		Objects   []struct {
+			Key  string `xml:"Key"`
+			ETag string `xml:"ETag"`
+			Size int64  `xml:"Size"`
+		} `xml:"Contents"`
+	}
+	if err := xml.Unmarshal(r.Body, &out); err != nil {
+		return nil, false, fmt.Errorf("yuruidb: malformed S3 blob listing")
+	}
+	items := make([]blob.Metadata, 0, len(out.Objects))
+	for _, item := range out.Objects {
+		if !strings.HasPrefix(item.Key, t.prefix) {
+			return nil, false, fmt.Errorf("yuruidb: foreign blob key")
+		}
+		items = append(items, blob.Metadata{ID: strings.TrimPrefix(item.Key, t.prefix), Revision: item.ETag, Size: item.Size})
+	}
+	return items, out.Truncated, nil
 }

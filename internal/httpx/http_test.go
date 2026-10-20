@@ -70,8 +70,12 @@ func TestRetryKeepsConditionsAndReauthorizes(t *testing.T) {
 		return &http.Response{StatusCode: status, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(""))}, nil
 	})}}
 	_, err := c.Do(context.Background(), "PUT", "https://example.invalid/item", []byte("same-body"), http.Header{"If-Match": {"old-token"}}, true)
-	if attempts != 2 || auths != 2 || !errors.Is(err, yuruidb.ErrOutcomeUnknown) || !errors.Is(err, yuruidb.ErrConflict) {
+	if attempts != 2 || auths != 2 || !errors.Is(err, yuruidb.ErrOutcomeUnknown) || errors.Is(err, yuruidb.ErrConflict) {
 		t.Fatalf("retry attempts=%d auths=%d err=%v", attempts, auths, err)
+	}
+	var remote *Error
+	if !errors.As(err, &remote) || remote.Status != 412 {
+		t.Fatalf("lost diagnostic cause: %v", err)
 	}
 }
 func TestReadRetryAndUnconditionalMutation(t *testing.T) {

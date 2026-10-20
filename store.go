@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"reflect"
 	"sync"
 )
@@ -216,6 +217,29 @@ func (s *Store) Delete[T any](ctx context.Context, id, revision string) error {
 }
 
 func (s *Store) Capabilities() Capabilities { return s.raw.Capabilities() }
+
+// Backup writes a consistent snapshot of the entire backend, including all
+// collections. Currently supported by bbolt. The caller owns and closes w.
+func (s *Store) Backup(ctx context.Context, w io.Writer) error {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.closed {
+		return ErrClosed
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if w == nil {
+		return ErrInvalid
+	}
+	backup, ok := s.raw.(interface {
+		Backup(context.Context, io.Writer) error
+	})
+	if !ok {
+		return ErrUnsupported
+	}
+	return backup.Backup(ctx, w)
+}
 func (s *Store) Close() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()

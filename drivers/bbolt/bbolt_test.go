@@ -8,7 +8,10 @@ import (
 	"github.com/shibukawa/yuruidb/drivers/bbolt"
 	"github.com/shibukawa/yuruidb/internal/conformance"
 	bolt "go.etcd.io/bbolt"
+	"io"
+	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -22,6 +25,147 @@ func TestConformance(t *testing.T) {
 		return s, s
 	})
 }
+
+func TestLiveBackupRestoresRecordsAndBlobs(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "db")
+	s, err := bbolt.Open(ctx, bbolt.Config{Path: path})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	if err := s.Bind[string]("jobs"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Bind[int]("counts"); err != nil {
+		t.Fatal(err)
+	}
+	record, err := s.Insert(ctx, "job", "saved")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Insert(ctx, "count", 42); err != nil {
+		t.Fatal(err)
+	}
+	blobs, err := bbolt.OpenBlobs(ctx, bbolt.Config{Path: path, Collection: "documents"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer blobs.Close()
+	meta, err := blobs.Insert(ctx, "document", strings.NewReader("document bytes"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var snapshot bytes.Buffer
+	if err := s.Backup(ctx, &snapshot); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Update(ctx, "job", "changed", record.Revision()); err != nil {
+		t.Fatal(err)
+	}
+	restoredPath := filepath.Join(t.TempDir(), "restored")
+	if err := os.WriteFile(restoredPath, snapshot.Bytes(), 0600); err != nil {
+		t.Fatal(err)
+	}
+	restored, err := bbolt.Open(ctx, bbolt.Config{Path: restoredPath})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer restored.Close()
+	if err := restored.Bind[string]("jobs"); err != nil {
+		t.Fatal(err)
+	}
+	if err := restored.Bind[int]("counts"); err != nil {
+		t.Fatal(err)
+	}
+	got, err := restored.Get[string](ctx, "job")
+	if err != nil || got.Data != "saved" || got.Revision() == "" {
+		t.Fatalf("restored record: %+v %v", got, err)
+	}
+	count, err := restored.Get[int](ctx, "count")
+	if err != nil || count.Data != 42 {
+		t.Fatalf("restored collection: %+v %v", count, err)
+	}
+	restoredBlobs, err := bbolt.OpenBlobs(ctx, bbolt.Config{Path: restoredPath, Collection: "documents"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer restoredBlobs.Close()
+	r, err := restoredBlobs.Open(ctx, meta.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, err := io.ReadAll(r)
+	r.Close()
+	if err != nil || string(data) != "document bytes" || r.Revision != meta.Revision {
+		t.Fatalf("restored blob: %s %v", data, err)
+	}
+	cancelCtx, cancel := context.WithCancel(ctx)
+	cancel()
+	if err := s.Backup(cancelCtx, io.Discard); !errors.Is(err, context.Canceled) {
+		t.Fatal(err)
+	}
+	if err := s.Backup(ctx, nil); !errors.Is(err, yuruidb.ErrInvalid) {
+		t.Fatal(err)
+	}
+	if err := s.Backup(ctx, failedWriter{}); !errors.Is(err, io.ErrClosedPipe) {
+		t.Fatalf("writer error: %v", err)
+	}
+	writeCtx, stop := context.WithCancel(ctx)
+	if err := s.Backup(writeCtx, cancelWriter{stop}); !errors.Is(err, context.Canceled) {
+		t.Fatalf("canceled during backup: %v", err)
+	}
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+	// Closing the record store leaves the separately owned Blob connection alive.
+	if _, err := blobs.List(ctx, yuruidb.ListOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Backup(ctx, io.Discard); !errors.Is(err, yuruidb.ErrClosed) {
+		t.Fatal(err)
+	}
+}
+
+type failedWriter struct{}
+
+func (failedWriter) Write([]byte) (int, error) { return 0, io.ErrClosedPipe }
+
+type cancelWriter struct{ cancel context.CancelFunc }
+
+func (w cancelWriter) Write(p []byte) (int, error) { w.cancel(); return len(p), nil }
+
+func TestBlobInsertFailureRollsBack(t *testing.T) {
+	s, err := bbolt.OpenBlobs(context.Background(), bbolt.Config{Path: filepath.Join(t.TempDir(), "db"), Collection: "documents"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	// A non-EOF source error must abort the transaction, leaving the ID reusable.
+	if _, err := s.Insert(context.Background(), "job", io.MultiReader(strings.NewReader(strings.Repeat("partial", 20000)), errorInput{})); !errors.Is(err, io.ErrClosedPipe) {
+		t.Fatal(err)
+	}
+	if _, err := s.Open(context.Background(), "job"); !errors.Is(err, yuruidb.ErrNotFound) {
+		t.Fatal(err)
+	}
+	if _, err := s.Insert(context.Background(), "job", strings.NewReader("complete")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Insert(context.Background(), "truncated", truncatedInput{}); !errors.Is(err, io.ErrUnexpectedEOF) {
+		t.Fatalf("source truncation was swallowed: %v", err)
+	}
+	if _, err := s.Open(context.Background(), "truncated"); !errors.Is(err, yuruidb.ErrNotFound) {
+		t.Fatal(err)
+	}
+}
+
+type errorInput struct{}
+
+func (errorInput) Read([]byte) (int, error) { return 0, io.ErrClosedPipe }
+
+type truncatedInput struct{}
+
+func (truncatedInput) Read(p []byte) (int, error) { return copy(p, "partial"), io.ErrUnexpectedEOF }
 func TestPersistenceAndCollections(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "db")
