@@ -7,17 +7,20 @@ import (
 	"io"
 	"math"
 	"net/http"
+	"sync"
 	"sync/atomic"
 
 	"github.com/shibukawa/yuruidb"
 )
 
 type httpReader struct {
-	store  *httpStore
-	ctx    context.Context
-	body   io.ReadCloser
-	meta   Metadata
-	closed atomic.Bool
+	store    *httpStore
+	ctx      context.Context
+	cancel   context.CancelFunc
+	streamMu sync.Mutex
+	body     io.ReadCloser
+	meta     Metadata
+	closed   atomic.Bool
 }
 
 func (r *httpReader) check() error {
@@ -30,13 +33,61 @@ func (r *httpReader) Read(p []byte) (int, error) {
 	if err := r.check(); err != nil {
 		return 0, err
 	}
+	if len(p) == 0 {
+		return 0, nil
+	}
+	r.streamMu.Lock()
+	defer r.streamMu.Unlock()
+	if err := r.check(); err != nil {
+		return 0, err
+	}
+	if r.body == nil {
+		response, err := r.get("")
+		if err != nil {
+			return 0, err
+		}
+		if r.store.token(response) != r.meta.Revision {
+			response.Body.Close()
+			return 0, yuruidb.ErrConflict
+		}
+		if r.meta.Size >= 0 && response.ContentLength >= 0 && response.ContentLength != r.meta.Size {
+			response.Body.Close()
+			return 0, fmt.Errorf("yuruidb: invalid Blob length")
+		}
+		r.body = response.Body
+	}
 	return r.body.Read(p)
 }
 func (r *httpReader) Close() error {
 	if r.closed.Swap(true) {
 		return nil
 	}
-	return r.body.Close()
+	r.cancel()
+	r.streamMu.Lock()
+	defer r.streamMu.Unlock()
+	if r.body != nil {
+		return r.body.Close()
+	}
+	return nil
+}
+
+func (r *httpReader) get(byteRange string) (*http.Response, error) {
+	req, err := http.NewRequestWithContext(r.ctx, "GET", r.store.config.ObjectURL(r.meta.ID), nil)
+	if err != nil {
+		return nil, yuruidb.ErrInvalid
+	}
+	req.Header.Set("Accept-Encoding", "identity")
+	if byteRange != "" {
+		req.Header.Set("Range", byteRange)
+	}
+	if r.store.config.Generation {
+		q := req.URL.Query()
+		q.Set("ifGenerationMatch", r.meta.Revision)
+		req.URL.RawQuery = q.Encode()
+	} else {
+		req.Header.Set("If-Match", r.meta.Revision)
+	}
+	return r.store.request(req, false)
 }
 func (r *httpReader) ReadAt(p []byte, off int64) (int, error) {
 	if err := r.check(); err != nil {
@@ -51,20 +102,7 @@ func (r *httpReader) ReadAt(p []byte, off int64) (int, error) {
 	if r.meta.Size >= 0 && off >= r.meta.Size {
 		return 0, io.EOF
 	}
-	req, err := http.NewRequestWithContext(r.ctx, "GET", r.store.config.ObjectURL(r.meta.ID), nil)
-	if err != nil {
-		return 0, yuruidb.ErrInvalid
-	}
-	req.Header.Set("Accept-Encoding", "identity")
-	req.Header.Set("Range", fmt.Sprintf("bytes=%d-%d", off, off+int64(len(p))-1))
-	if r.store.config.Generation {
-		q := req.URL.Query()
-		q.Set("ifGenerationMatch", r.meta.Revision)
-		req.URL.RawQuery = q.Encode()
-	} else {
-		req.Header.Set("If-Match", r.meta.Revision)
-	}
-	response, err := r.store.request(req, false)
+	response, err := r.get(fmt.Sprintf("bytes=%d-%d", off, off+int64(len(p))-1))
 	if err != nil {
 		var status *statusError
 		if errors.As(err, &status) && status.status == http.StatusRequestedRangeNotSatisfiable {

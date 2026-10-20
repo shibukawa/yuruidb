@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"io"
 	"sync/atomic"
@@ -14,6 +15,8 @@ import (
 )
 
 const blobChunkSize = 64 << 10
+const blobBatchSize = 2 << 20
+const blobStagingPrefix = ".yuruidb-blob-staging/"
 
 var blobMetaKey = []byte(".meta")
 
@@ -25,8 +28,8 @@ type blobBackend struct {
 
 // OpenBlobs shares the reference-counted file connection with record stores.
 // Documents live in reserved buckets, separately from record collections, and
-// are stored in 64 KiB chunks. Range reads use bounded buffers; inserts use one
-// write transaction and retain pending data in memory until commit.
+// are stored in 64 KiB chunks. Insert reads input outside transactions, writes
+// staging data in batches of at most 2 MiB, and atomically publishes the bucket.
 func OpenBlobs(ctx context.Context, c Config) (*blob.Store, error) {
 	if err := yuruidb.ValidateCollection(c.Collection); err != nil {
 		return nil, err
@@ -95,7 +98,52 @@ func (r *blobInput) Read(p []byte) (int, error) {
 	return n, err
 }
 
-func (b *blobBackend) Insert(ctx context.Context, id string, source io.Reader) (blob.Metadata, error) {
+func (b *blobBackend) stagingBucket() []byte {
+	return []byte(blobStagingPrefix + string(b.bucket[len(".yuruidb-blobs/"):]))
+}
+
+// Only called when opening a file with no existing owners. Running this on a
+// borrowed connection would remove uploads that are still receiving input.
+func cleanupBlobStaging(db *bolt.DB) error {
+	var buckets [][]byte
+	err := db.View(func(tx *bolt.Tx) error {
+		return tx.ForEach(func(name []byte, _ *bolt.Bucket) error {
+			if bytes.HasPrefix(name, []byte(blobStagingPrefix)) {
+				buckets = append(buckets, bytes.Clone(name))
+			}
+			return nil
+		})
+	})
+	if err != nil || len(buckets) == 0 {
+		return err
+	}
+	return db.Update(func(tx *bolt.Tx) error {
+		for _, name := range buckets {
+			if err := tx.DeleteBucket(name); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
+func (b *blobBackend) discardStaging(tx *bolt.Tx, revision string) error {
+	root := tx.Bucket(b.stagingBucket())
+	if root == nil {
+		return nil
+	}
+	if root.Bucket([]byte(revision)) != nil {
+		if err := root.DeleteBucket([]byte(revision)); err != nil {
+			return err
+		}
+	}
+	if key, _ := root.Cursor().First(); key == nil {
+		return tx.DeleteBucket(b.stagingBucket())
+	}
+	return nil
+}
+
+func (b *blobBackend) Insert(ctx context.Context, id string, source io.Reader) (out blob.Metadata, result error) {
 	if err := b.check(ctx); err != nil {
 		return blob.Metadata{}, err
 	}
@@ -104,6 +152,80 @@ func (b *blobBackend) Insert(ctx context.Context, id string, source io.Reader) (
 		return blob.Metadata{}, err
 	}
 	meta := blob.Metadata{ID: id, Revision: revision}
+	err = b.t.db.View(func(tx *bolt.Tx) error {
+		if tx.Bucket(b.bucket).Bucket([]byte(id)) != nil {
+			return yuruidb.ErrAlreadyExists
+		}
+		return nil
+	})
+	if err != nil {
+		return blob.Metadata{}, mapError(err)
+	}
+	staged := false
+	defer func() {
+		if staged {
+			// Cleanup deliberately does not inherit a canceled upload context.
+			if err := b.t.db.Update(func(tx *bolt.Tx) error { return b.discardStaging(tx, revision) }); err != nil {
+				result = errors.Join(result, fmt.Errorf("yuruidb: cleaning Blob upload: %w", mapError(err)))
+			}
+		}
+	}()
+	buf := make([]byte, blobBatchSize)
+	input := &blobInput{ctx: ctx, source: source}
+	for {
+		n, readErr := io.ReadFull(input, buf)
+		if input.err != nil && input.err != io.EOF {
+			return blob.Metadata{}, input.err
+		}
+		if readErr != nil && readErr != io.EOF && readErr != io.ErrUnexpectedEOF {
+			return blob.Metadata{}, readErr
+		}
+		final := readErr != nil || input.err == io.EOF
+		err = b.t.db.Update(func(tx *bolt.Tx) error {
+			if err := b.check(ctx); err != nil {
+				return err
+			}
+			root, err := tx.CreateBucketIfNotExists(b.stagingBucket())
+			if err != nil {
+				return err
+			}
+			attempt := root.Bucket([]byte(revision))
+			if !staged {
+				attempt, err = root.CreateBucket([]byte(revision))
+				if err != nil {
+					return err
+				}
+				staged = true
+				if _, err := attempt.CreateBucket([]byte(id)); err != nil {
+					return err
+				}
+			}
+			if attempt == nil {
+				return fmt.Errorf("yuruidb: missing Blob upload staging")
+			}
+			bucket := attempt.Bucket([]byte(id))
+			for start := 0; start < n; start += blobChunkSize {
+				key := binary.BigEndian.AppendUint64(nil, uint64((meta.Size+int64(start))/blobChunkSize))
+				if err := bucket.Put(key, buf[start:min(start+blobChunkSize, n)]); err != nil {
+					return err
+				}
+			}
+			if final {
+				data := binary.BigEndian.AppendUint64(nil, uint64(meta.Size+int64(n)))
+				return bucket.Put(blobMetaKey, append(data, revision...))
+			}
+			return nil
+		})
+		if err != nil {
+			return blob.Metadata{}, mapError(err)
+		}
+		meta.Size += int64(n)
+		if final {
+			break
+		}
+	}
+	// Move only an already committed bucket: changing its contents in this same
+	// transaction would leave dirty child nodes behind in the source bucket.
 	err = b.t.db.Update(func(tx *bolt.Tx) error {
 		if err := b.check(ctx); err != nil {
 			return err
@@ -112,42 +234,16 @@ func (b *blobBackend) Insert(ctx context.Context, id string, source io.Reader) (
 		if root.Bucket([]byte(id)) != nil {
 			return yuruidb.ErrAlreadyExists
 		}
-		bucket, err := root.CreateBucket([]byte(id))
-		if err != nil {
+		attempt := tx.Bucket(b.stagingBucket()).Bucket([]byte(revision))
+		if err := attempt.MoveBucket([]byte(id), root); err != nil {
 			return err
 		}
-		buf := make([]byte, blobChunkSize)
-		input := &blobInput{ctx: ctx, source: source}
-		for chunk := uint64(0); ; chunk++ {
-			n, readErr := io.ReadFull(input, buf)
-			if input.err != nil && input.err != io.EOF {
-				return input.err
-			}
-			if readErr != nil && readErr != io.EOF && readErr != io.ErrUnexpectedEOF {
-				return readErr
-			}
-			if n > 0 {
-				key := binary.BigEndian.AppendUint64(nil, chunk)
-				// bbolt retains the value until commit: each chunk needs its own bytes.
-				if err := bucket.Put(key, bytes.Clone(buf[:n])); err != nil {
-					return err
-				}
-				meta.Size += int64(n)
-			}
-			if readErr != nil {
-				break
-			}
-		}
-		if err := b.check(ctx); err != nil {
-			return err
-		}
-		data := binary.BigEndian.AppendUint64(nil, uint64(meta.Size))
-		data = append(data, revision...)
-		return bucket.Put(blobMetaKey, data)
+		return b.discardStaging(tx, revision)
 	})
 	if err != nil {
 		return blob.Metadata{}, mapError(err)
 	}
+	staged = false
 	return meta, nil
 }
 

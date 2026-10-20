@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -49,12 +50,16 @@ func TestStreamingDocumentExceedsJSONResponseLimit(t *testing.T) {
 			}
 			stored = true
 			w.Header().Set("ETag", `"blob-v1"`)
-		case "GET":
+		case "GET", "HEAD":
 			if !stored {
 				w.WriteHeader(404)
 				return
 			}
 			w.Header().Set("ETag", `"blob-v1"`)
+			w.Header().Set("Content-Length", strconv.FormatInt(size, 10))
+			if r.Method == "HEAD" {
+				return
+			}
 			io.Copy(w, io.LimitReader(repeated('x'), size))
 		case "DELETE":
 			if r.Header.Get("If-Match") != `"blob-v1"` {

@@ -222,8 +222,9 @@ func (s *Store) Capabilities() Capabilities { return s.raw.Capabilities() }
 // collections. Currently supported by bbolt. The caller owns and closes w.
 func (s *Store) Backup(ctx context.Context, w io.Writer) error {
 	s.mu.RLock()
-	defer s.mu.RUnlock()
-	if s.closed {
+	closed, raw := s.closed, s.raw
+	s.mu.RUnlock()
+	if closed {
 		return ErrClosed
 	}
 	if err := ctx.Err(); err != nil {
@@ -232,7 +233,7 @@ func (s *Store) Backup(ctx context.Context, w io.Writer) error {
 	if w == nil {
 		return ErrInvalid
 	}
-	backup, ok := s.raw.(interface {
+	backup, ok := raw.(interface {
 		Backup(context.Context, io.Writer) error
 	})
 	if !ok {

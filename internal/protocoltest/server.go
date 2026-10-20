@@ -124,7 +124,7 @@ func (s *Server) s3(w http.ResponseWriter, r *http.Request) {
 	}
 	key := strings.TrimPrefix(r.URL.Path, "/bucket/")
 	switch r.Method {
-	case "GET":
+	case "GET", "HEAD":
 		v, ok := s.items[key]
 		if !ok {
 			http.NotFound(w, r)
@@ -201,6 +201,10 @@ func (s *Server) gcs(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("X-Goog-Generation", v.token)
 		if q.Get("ifGenerationMatch") != "" && q.Get("ifGenerationMatch") != v.token {
 			w.WriteHeader(412)
+			return
+		}
+		if q.Get("alt") != "media" {
+			reply(w, map[string]string{"generation": v.token, "size": fmt.Sprint(len(v.data))})
 			return
 		}
 		http.ServeContent(w, r, "", time.Time{}, bytes.NewReader(v.data))

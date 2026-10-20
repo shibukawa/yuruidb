@@ -104,6 +104,13 @@ func openTransport(ctx context.Context, c Config) (*transport, error) {
 			connections.Unlock()
 			return nil, err
 		}
+		// This is the first owner of the file: no live upload can use its staging
+		// buckets. Recover abandoned uploads before publishing the connection.
+		if err := cleanupBlobStaging(db); err != nil {
+			db.Close()
+			connections.Unlock()
+			return nil, err
+		}
 		conn = &connection{db: db, refs: 1, mode: mode, timeout: timeout}
 		connections.files[path] = conn
 	}
