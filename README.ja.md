@@ -4,7 +4,7 @@
 
 Go 1.27以上で動く、保存先を選べるレコードストレージライブラリです。1つの`Store`が接続を所有し、メソッドの型引数でデータ種とコレクションを選びます。JSONデータは`Record[T]`・`Page[T]`で扱います。キーには検証済みの名前やUUIDv7を使え、一覧はIDのバイト列昇順です。
 
-クラウドドライバは標準ライブラリのHTTPを使い、クラウドSDKに依存しません。コアも外部パッケージをimportしません。bboltは選択したドライバの依存、cgoのSQLiteテストは別の[integration module](integration)に分離しています。
+クラウドドライバは標準ライブラリのHTTPを使い、クラウドSDKに依存しません。コアも外部パッケージをimportしません。bboltは選択したドライバの依存、純GoのSQLiteテスト依存は別の[integration module](integration)に分離しています。
 
 module pathは`github.com/shibukawa/yuruidb`です。
 
@@ -124,4 +124,4 @@ go vet ./...
 python3 scripts/check-builds.py
 ```
 
-ルートmoduleにcgoは不要です。integration moduleだけがmattn/go-sqlite3に依存します。実bbolt・SQLiteと独立したHTTP fixtureで、応答喪失、再作成後の古い書き込み、複数コレクション、2000件から10件への削除、認証フロー、互換性診断、34MiBの文書を検証します。実クラウド・実PostgreSQL・IAM・本番性能は未検証です。[実装ガイド](docs/implementation.ja.md)と[検証履歴](docs/implementation-validation.md)も参照してください。
+両moduleともcgoは不要です。integration moduleだけが純Goのmodernc.org/sqliteに依存します。実bbolt・SQLiteと独立したHTTP fixtureで、応答喪失、再作成後の古い書き込み、複数コレクション、2000件から10件への削除、認証フロー、互換性診断、34MiBの文書を検証します。実クラウド・実PostgreSQL・IAM・本番性能は未検証です。[実装ガイド](docs/implementation.ja.md)と[検証履歴](docs/implementation-validation.md)も参照してください。

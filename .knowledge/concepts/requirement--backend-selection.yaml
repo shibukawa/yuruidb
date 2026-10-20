@@ -106,7 +106,7 @@ verification:
     - path: examples/basic/main.go
       input_hash: a07adff7389b21a014002d7a3d27eb8ac88968b2a3df507ed1c31e08f253f572
     - path: docs/implementation-validation.md
-      input_hash: 56d9658830444f2cdd7923b3f5bb63ac534ec2a4bf2d2d7fd72e3778f753eb05
+      input_hash: 09198cbe95e8737bb38937807a8f75f63b5238d2c3d011d9a0d86e27a89324fc
     evidence:
       input_path: docs/implementation-validation.md
     scope:

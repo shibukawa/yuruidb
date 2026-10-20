@@ -73,7 +73,7 @@ verification:
     - path: internal/conformance/conformance.go
       input_hash: 0e68dfbe3e4c9e2fced6b5dac556e1f896aa96c38aa4ee0ac7ca6a81824434a1
     - path: docs/implementation-validation.md
-      input_hash: 56d9658830444f2cdd7923b3f5bb63ac534ec2a4bf2d2d7fd72e3778f753eb05
+      input_hash: 09198cbe95e8737bb38937807a8f75f63b5238d2c3d011d9a0d86e27a89324fc
     - path: drivers/s3/s3_test.go
       input_hash: cf605feb388a516b1788ea8f00db3ad3aedc32221e01cc2302d9e16d7dca5aa7
     - path: internal/protocoltest/server.go

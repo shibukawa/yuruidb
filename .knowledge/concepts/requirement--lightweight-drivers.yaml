@@ -33,7 +33,7 @@ facts:
   sdk_alternative: Evaluate selected AWS SDK v2 modules against a handwritten HTTP client rather than assuming a
     size result.
   implemented_dependency_boundary: Standard-library-only core and cloud drivers; root module declares bbolt; test-only
-    cgo SQLite is isolated in integration/go.mod.
+    pure-Go modernc SQLite is isolated in integration/go.mod.
   auth_implementation: SigV4 with environment/web identity/container/IMDSv2 role providers and refresh, plus injected
     providers and GCP metadata tokens.
 acceptance:
@@ -53,7 +53,7 @@ verification:
     - path: go.mod
       input_hash: e44147fdb31655b4b1f85a3e3f469753946b6112bd0236946c3f66c233edb88c
     - path: docs/implementation-validation.md
-      input_hash: 56d9658830444f2cdd7923b3f5bb63ac534ec2a4bf2d2d7fd72e3778f753eb05
+      input_hash: 09198cbe95e8737bb38937807a8f75f63b5238d2c3d011d9a0d86e27a89324fc
     evidence:
       input_path: docs/implementation-validation.md
     scope:

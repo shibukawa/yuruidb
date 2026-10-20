@@ -79,3 +79,14 @@ AWS認証は環境変数の優先、コンテナ/Pod Identityのtoken file、期
 既存のHTTP fixtureは条件付き削除・値付き一覧の独立した処理へ拡張した。クラウド資格情報・実リソースを使う検証は行っておらず、実クラウド・実PostgreSQL・IAM・サービスの全互換性・本番負荷とコストは未検証。S3互換性probeも有限の観測である。
 
 通常sandboxではローカルlistenとGoの外部キャッシュ書き込みに制約があるため、ローカルテスト用ポートとキャッシュ書き込みを許可した実行で最終チェックを完了した。
+
+## 純Go SQLiteドライバへの置換
+
+2026-10-20、Go 1.27.0、macOS/arm64で確認。integration moduleのmattn/go-sqlite3をmodernc.org/sqlite v1.60.1へ置換した。database/sqlのドライバ名とDSNを合わせ、接続ごとのbusy_timeoutとWALの指定を維持した。ルートmoduleの依存は変更していない。
+
+| 検証 | 結果 | 範囲 |
+| --- | --- | --- |
+| sh scripts/check-all.sh | 成功 | ルートとintegrationのrace・vet、cgo無効のintegrationテスト、既存タグビルドと実行例 |
+| CGO_ENABLED=0 sh scripts/check-all.sh | 成功 | 両moduleのテストとvet、既存タグビルドと実行例をcgoなしで実行 |
+
+実SQLiteの同一ファイルに独立した2接続を開くconformanceと、実SQLiteでSQLを実行するD1 HTTP fixtureを通過した。race detector自体はcgoを要するため、cgo有効時だけ追加実行する。ドライバ変更による性能比較や実D1への接続は検証していない。

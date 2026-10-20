@@ -185,7 +185,7 @@ verification:
     - path: drivers/d1/d1.go
       input_hash: 8b249910026f339b43637c52af543c63e7824b4979ac9011e758f45a3543e4b5
     - path: integration/d1_test.go
-      input_hash: 682fcd218069851f5c604a0337632330a481eac9063c448542b0505a1ecd8ba8
+      input_hash: 2395a24938a6a4855ccf4bc88795a6bd2c147124ec8eb6ca99b34cffd752b464
     - path: drivers/dynamodb/dynamodb.go
       input_hash: 07ab7593f5daa128b4410ee0fac7925d58dceb0d58a92d9ac50a50205def60c6
     - path: drivers/dynamodb/dynamodb_test.go
@@ -217,7 +217,7 @@ verification:
     - path: drivers/sql/sql.go
       input_hash: 44fcc3aff9a7d431d99142c6f505014a28b9b2bc80a7819e2acc0a608ff5e99e
     - path: integration/sql_test.go
-      input_hash: a4883a6a6540108440b9483c779946504acfe82b1111ce3f2c37e825659e745c
+      input_hash: 0158fee997a633f98d460607d2e7489e9807287b8f15c2003e31e707e5db7fc1
     - path: examples/basic/main.go
       input_hash: a07adff7389b21a014002d7a3d27eb8ac88968b2a3df507ed1c31e08f253f572
     - path: examples/drivers/main.go
@@ -249,7 +249,7 @@ verification:
     - path: scripts/check-builds.py
       input_hash: 616e685b0406c9bc8bfde7ce1b48cf41addc0f311a3e1efa43ad4f63b7e99c12
     - path: docs/implementation-validation.md
-      input_hash: 56d9658830444f2cdd7923b3f5bb63ac534ec2a4bf2d2d7fd72e3778f753eb05
+      input_hash: 09198cbe95e8737bb38937807a8f75f63b5238d2c3d011d9a0d86e27a89324fc
     - path: raw.go
       input_hash: b2b8a6aa37daad55d8e8c452764bfd4497a3b1219a8da2403bdfed8630c9c023
     - path: store_test.go
@@ -272,9 +272,9 @@ verification:
     authority: observed
     basis:
     - path: README.md
-      input_hash: a336b32d6ecefd8d662aa568a5073c80ca6e94e6ccca0e324cb43163308cd17a
+      input_hash: dc42e05b346d18adbff2bc8ad17ff045b8cdb90e76ff9a7caa2cb414373b32d3
     - path: README.ja.md
-      input_hash: f4c435bba9a55824a6a156e43d7913c09923abd583e01d9aa9c3397f34ca3889
+      input_hash: 00d5731f5aa446915c0fc0512b3204ccc9f73ce8d4115a9bd54a7e57df8a93e0
     - path: LICENSE
       input_hash: cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30
 history:

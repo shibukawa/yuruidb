@@ -67,7 +67,7 @@ facts:
   - AWS environment/web identity/container/IMDSv2 credentials with refresh
   - Verified custom S3/R2 conditions and AWS virtual hosting
   - Immutable streaming Blob API
-  - cgo SQLite dependency isolated to integration module
+  - Pure-Go modernc SQLite dependency isolated to integration module
   prerelease_formats: No legacy compatibility or migration procedures; use the current API and storage formats.
 relations:
 - relation: implements
@@ -98,13 +98,13 @@ verification:
     - path: internal/conformance/conformance.go
       input_hash: 0e68dfbe3e4c9e2fced6b5dac556e1f896aa96c38aa4ee0ac7ca6a81824434a1
     - path: docs/implementation-validation.md
-      input_hash: 56d9658830444f2cdd7923b3f5bb63ac534ec2a4bf2d2d7fd72e3778f753eb05
+      input_hash: 09198cbe95e8737bb38937807a8f75f63b5238d2c3d011d9a0d86e27a89324fc
     - path: drivers/s3/s3_test.go
       input_hash: cf605feb388a516b1788ea8f00db3ad3aedc32221e01cc2302d9e16d7dca5aa7
     - path: integration/sql_test.go
-      input_hash: a4883a6a6540108440b9483c779946504acfe82b1111ce3f2c37e825659e745c
+      input_hash: 0158fee997a633f98d460607d2e7489e9807287b8f15c2003e31e707e5db7fc1
     - path: integration/d1_test.go
-      input_hash: 682fcd218069851f5c604a0337632330a481eac9063c448542b0505a1ecd8ba8
+      input_hash: 2395a24938a6a4855ccf4bc88795a6bd2c147124ec8eb6ca99b34cffd752b464
     - path: auth/aws/aws_test.go
       input_hash: bf8ab31a2215a161f0d70172757eb9b357166a84435d25b3a00d08cffa9331d0
     - path: raw.go
@@ -130,7 +130,7 @@ verification:
     - path: backends/backends.go
       input_hash: 28d096d83dc44ea6ac45d8443c5ca3ad3bd0d418a7ce7ea994b8a3e40f0e1a06
     - path: docs/implementation-validation.md
-      input_hash: 56d9658830444f2cdd7923b3f5bb63ac534ec2a4bf2d2d7fd72e3778f753eb05
+      input_hash: 09198cbe95e8737bb38937807a8f75f63b5238d2c3d011d9a0d86e27a89324fc
     evidence:
       input_path: docs/implementation-validation.md
 open_questions:

@@ -4,20 +4,21 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
-	_ "github.com/mattn/go-sqlite3"
-	"github.com/shibukawa/yuruidb"
-	"github.com/shibukawa/yuruidb/auth"
-	"github.com/shibukawa/yuruidb/drivers/d1"
-	"github.com/shibukawa/yuruidb/internal/conformance"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/shibukawa/yuruidb"
+	"github.com/shibukawa/yuruidb/auth"
+	"github.com/shibukawa/yuruidb/drivers/d1"
+	"github.com/shibukawa/yuruidb/internal/conformance"
+	_ "modernc.org/sqlite"
 )
 
 func TestRESTConformance(t *testing.T) {
 	conformance.Run(t, func(t *testing.T) (yuruidb.RawStore, yuruidb.RawStore) {
-		db, err := sql.Open("sqlite3", ":memory:")
+		db, err := sql.Open("sqlite", ":memory:")
 		if err != nil {
 			t.Fatal(err)
 		}

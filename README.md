@@ -4,7 +4,7 @@
 
 A Go 1.27+ record storage library with interchangeable, statically imported backends. One `Store` owns a connection; generic methods select the registered data type and collection. JSON data uses `Record[T]` and `Page[T]`. IDs may be validated names or generated UUIDv7 strings. Listing uses ascending ID byte order.
 
-Cloud drivers use standard-library HTTP, without cloud SDK dependencies. The core has no external imports. bbolt is an optional driver dependency; cgo SQLite tests live in the separate [integration module](integration).
+Cloud drivers use standard-library HTTP, without cloud SDK dependencies. The core has no external imports. bbolt is an optional driver dependency; pure-Go SQLite test dependencies live in the separate [integration module](integration).
 
 The module path is `github.com/shibukawa/yuruidb`.
 
@@ -124,4 +124,4 @@ go vet ./...
 python3 scripts/check-builds.py
 ```
 
-The root module has no cgo requirement. The integration module alone depends on mattn/go-sqlite3. Tests exercise actual bbolt/SQLite and independent HTTP fixtures, including response loss, stale writers after recreation, multi-collection access, 2000-to-10 record deletion, cloud credential flows, compatibility probes, and 34 MiB streaming. Live cloud services, actual PostgreSQL, IAM, and production performance remain unverified. See the [implementation guide](docs/implementation.ja.md) and [validation history](docs/implementation-validation.md).
+Both modules work without cgo. The integration module alone depends on the pure-Go modernc.org/sqlite driver. Tests exercise actual bbolt/SQLite and independent HTTP fixtures, including response loss, stale writers after recreation, multi-collection access, 2000-to-10 record deletion, cloud credential flows, compatibility probes, and 34 MiB streaming. Live cloud services, actual PostgreSQL, IAM, and production performance remain unverified. See the [implementation guide](docs/implementation.ja.md) and [validation history](docs/implementation-validation.md).

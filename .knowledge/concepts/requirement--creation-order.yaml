@@ -70,7 +70,7 @@ verification:
     - path: internal/conformance/conformance.go
       input_hash: 0e68dfbe3e4c9e2fced6b5dac556e1f896aa96c38aa4ee0ac7ca6a81824434a1
     - path: docs/implementation-validation.md
-      input_hash: 56d9658830444f2cdd7923b3f5bb63ac534ec2a4bf2d2d7fd72e3778f753eb05
+      input_hash: 09198cbe95e8737bb38937807a8f75f63b5238d2c3d011d9a0d86e27a89324fc
     - path: id_test.go
       input_hash: 101abe7c3a05533d332000f13b98fa073846ae2cfe05727a256f910efe031060
     - path: raw.go

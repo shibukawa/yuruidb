@@ -145,7 +145,7 @@ verification:
     - path: internal/conformance/conformance.go
       input_hash: 0e68dfbe3e4c9e2fced6b5dac556e1f896aa96c38aa4ee0ac7ca6a81824434a1
     - path: docs/implementation-validation.md
-      input_hash: 56d9658830444f2cdd7923b3f5bb63ac534ec2a4bf2d2d7fd72e3778f753eb05
+      input_hash: 09198cbe95e8737bb38937807a8f75f63b5238d2c3d011d9a0d86e27a89324fc
     - path: raw.go
       input_hash: b2b8a6aa37daad55d8e8c452764bfd4497a3b1219a8da2403bdfed8630c9c023
     - path: store_test.go
@@ -181,7 +181,7 @@ verification:
     - path: drivers/cfkv/cfkv_test.go
       input_hash: 0a1e072f2fcda239ef636e386152370923d03053f457019daf29e69d8c12d966
     - path: docs/implementation-validation.md
-      input_hash: 56d9658830444f2cdd7923b3f5bb63ac534ec2a4bf2d2d7fd72e3778f753eb05
+      input_hash: 09198cbe95e8737bb38937807a8f75f63b5238d2c3d011d9a0d86e27a89324fc
     - path: record.go
       input_hash: 720514acfcf76c8e0df7cb75a5e5524871275f00c2015a2b96ca87c2917f0b9d
     - path: record_test.go
@@ -208,7 +208,7 @@ verification:
     - path: drivers/cfkv/cfkv_test.go
       input_hash: 0a1e072f2fcda239ef636e386152370923d03053f457019daf29e69d8c12d966
     - path: docs/implementation-validation.md
-      input_hash: 56d9658830444f2cdd7923b3f5bb63ac534ec2a4bf2d2d7fd72e3778f753eb05
+      input_hash: 09198cbe95e8737bb38937807a8f75f63b5238d2c3d011d9a0d86e27a89324fc
     evidence:
       input_path: docs/implementation-validation.md
       locator: Go 1.27・複数コレクションとbdfフィードバック対応

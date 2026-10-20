@@ -130,7 +130,7 @@ bboltはValueをEnvelopeのJSONで一度base64化し、そのEnvelope全体をIt
 | 一時エラーの再試行 | 読み取りは上限付きbackoffとjitterを導入。書き込みは同じ操作の再送と結果照合を設計してから追加する。試行ごとに再署名し、contextとRetry-Afterを尊重する |
 | S3互換サービス | create-if-absent、古いETagでの更新、並行更新、条件付き削除を使い捨てキーで検証する明示的な診断機能を用意。単にヘッダーを送るだけで保証済みとはしない。不対応時に無条件更新へ切り替えない |
 | 大きな文書 | RawStoreは既に[]byteを扱うが、streaming APIはない。小さいメタデータをレコードに、大きな本文を別のBlob APIに置く案を分離して検討する。共通CRUDの上限は保存先別に明示する |
-| テスト用cgo依存 | mattn/go-sqlite3の直接依存はテストからの直接importに対応しており、通常の利用バイナリへ自動的に入る意味ではない。純Goドライバへの置換か、integration test用moduleへの分離を選ぶ。build tagだけではgo mod tidy上の依存隔離にならない |
+| テスト用cgo依存 | 純Goのmodernc.org/sqliteへ置換し、integration test用moduleへの分離も維持する。build tagだけではgo mod tidy上の依存隔離にならない |
 
 AWSの既定認証チェーンと期限付き資格情報の更新は[公式説明](https://docs.aws.amazon.com/sdkref/latest/guide/standardized-credentials.html)、S3のアクセス形式と廃止延期は[公式ガイド](https://docs.aws.amazon.com/AmazonS3/latest/userguide/VirtualHosting.html)を確認した。SDK認証adapterを別moduleにするかは、依存量と実装負担を比較して決める。
 

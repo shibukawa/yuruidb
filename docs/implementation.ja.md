@@ -56,7 +56,7 @@ Regionは明示値、AWS_REGION、AWS_DEFAULT_REGION、us-east-1の順。R2はau
 
 s3.OpenBlobs・r2.OpenBlobs・gcs.OpenBlobsは別コレクションで生の文書を扱う。Blob.Insertは変更しない文書を条件付き作成し、入力を一時ファイルへ退避する。SigV4もio.Copyでハッシュを計算し、文書全体をメモリへ読み込まない。一時ファイルは終了時に削除する。Blob.OpenのReaderは呼び出し側がCloseする。既定timeoutは5分で、Client注入で変更できる。レコード用32MiB上限は通らない。Blobのnative ETagは内容が同じだと再利用され得るため、新しいIDを発行し、参照を小さなレコードに置く。複数キーのトランザクションは提供しない。
 
-コアは標準ライブラリのみ。ルートgo.modはbboltとその間接依存だけを持つ。mattn/go-sqlite3はintegration/go.modへ分離し、実SQLiteとD1のテストをそこで走らせる。build tagはstatic importをまとめ、依存moduleの隔離には使わない。
+コアは標準ライブラリのみ。ルートgo.modはbboltとその間接依存だけを持つ。純Goのmodernc.org/sqliteはintegration/go.modへ分離し、実SQLiteとD1のテストをcgoなしで走らせる。build tagはstatic importをまとめ、依存moduleの隔離には使わない。
 
 外部ドライバはRawStoreとRegisterで接続できる。adapter.Backendは元のRead/Write/Keys/Close契約を維持する。任意のItemWriter・Scanner・Deleter・CollectionTransportを追加すると、tokenを返す書込、値付き一覧、物理削除、接続共有に対応できる。能力がない場合は安全な読み直し・墓標・単一コレクションの経路を使う。公開の型付きAPIはOpen/Wrap/adapter.Newに統一し、コレクション名をその都度指定する公開ビューは設けない。
 

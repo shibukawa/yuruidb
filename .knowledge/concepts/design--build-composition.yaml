@@ -112,7 +112,7 @@ verification:
     - path: backends/import_firebase.go
       input_hash: ec3ff1f033105a862158342cc4fed75ca516d6e72989eae3575ce4529ac6fc5c
     - path: docs/implementation-validation.md
-      input_hash: 56d9658830444f2cdd7923b3f5bb63ac534ec2a4bf2d2d7fd72e3778f753eb05
+      input_hash: 09198cbe95e8737bb38937807a8f75f63b5238d2c3d011d9a0d86e27a89324fc
     evidence:
       input_path: docs/implementation-validation.md
     scope:
