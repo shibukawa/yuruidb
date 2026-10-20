@@ -89,9 +89,9 @@ AWS S3は適切なbucket名ならvirtual-hostedを既定にし、ドット入り
 
 ## 大きな文書
 
-sql.OpenBlobs・bbolt.OpenBlobs・s3.OpenBlobs・r2.OpenBlobs・gcs.OpenBlobsで、明示したコレクションに変更しない文書を保存できます。Insert(ctx, id, io.Reader)は未使用のIDを作成します。HTTP版は署名と再送用に一時ファイルへ入力を退避し、文書全体をメモリへ読み込みません。bbolt版は同じファイルの予約バケット`.yuruidb-blobs/<collection>`へ64KiBずつ保存し、レコード用バケットから分離します。bboltの挿入は単一の書き込みトランザクションで行うため、確定まで入力分のメモリと書き込みロックを保持します。レコード用のJSON応答上限は適用しません。
+sql.OpenBlobs・bbolt.OpenBlobs・s3.OpenBlobs・r2.OpenBlobs・gcs.OpenBlobsで、明示したコレクションに変更しない文書を保存できます。Insert(ctx, id, io.Reader)は未使用のIDを作成します。HTTP版は署名と再送用に一時ファイルへ入力を退避し、文書全体をメモリへ読み込みません。bbolt版は同じファイルの予約バケット`.yuruidb-blobs/<collection>`へ64KiBずつ保存し、レコード用バケットから分離します。bboltはトランザクションの外で入力を読み、最大2MiBずつ短いトランザクションで作業用バケットへ保存します。最後に完成したバケットを移動して一括公開し、途中の文書は一覧や読み取りには出しません。失敗・キャンセル時は掃除し、中断して残った作業データは次にファイルを最初の所有者が開いた際に回収します。追加のハンドルを開いても、進行中のアップロードは掃除しません。レコード用のJSON応答上限は適用しません。
 
-Open(ctx, id)の戻り値はストリーミングに加えてio.ReaderAtにも対応します。読み終えるまでcontextを有効に保ち、Closeしてください。HTTPのReadAtは取得時のETag・generationを条件に範囲を読み、範囲指定を無視する保存先ではErrUnsupportedを返します。bboltは短い読み取りトランザクションを使います。List(ctx, yuruidb.ListOptions{Limit: 100})は本文を読まず、ID順のblob.Page（BlobsとCursor）を返します。各要素はID・Revision・Sizeを持ち、次ページにはCursorを渡します。レコードの参照と比較して孤立候補を探せますが、ページ間のスナップショットはありません。保存途中のBlobを削除しないよう、掃除と書き込みを呼び出し側で調整してください。
+Open(ctx, id)の戻り値はストリーミングに加えてio.ReaderAtにも対応します。読み終えるまでcontextを有効に保ち、Closeしてください。HTTP版のOpenはS3/R2のHEADまたはGCSのJSONリソースでメタデータだけを取得します。本文のGETは最初の空でないReadで開始し、取得時の版を条件に付けます。ReadAtだけなら本文全体のストリームは開きません。Closeは読み取り中のリクエストも取り消します。HTTPのReadAtは取得時のETag・generationを条件に範囲を読み、範囲指定を無視する保存先ではErrUnsupportedを返します。bboltは短い読み取りトランザクションを使います。List(ctx, yuruidb.ListOptions{Limit: 100})は本文を読まず、ID順のblob.Page（BlobsとCursor）を返します。各要素はID・Revision・Sizeを持ち、次ページにはCursorを渡します。レコードの参照と比較して孤立候補を探せますが、ページ間のスナップショットはありません。保存途中のBlobを削除しないよう、掃除と書き込みを呼び出し側で調整してください。
 
 小さな型付きレコードには文書のID・版の参照を置きます。BlobのETagは同じ内容で再利用され得るため、IDは再利用せず新しく生成してください。条件付きDelete(ctx, id, revision)には保存先の対応が必要です。明示的なRemove(ctx, id)は条件付きDELETE非対応でも無条件に削除します。IDを再利用しない運用で使ってください。文書とレコードの操作をまたぐトランザクションはありません。
 
@@ -122,7 +122,7 @@ blobs, err := sqldriver.OpenBlobs(ctx, sqldriver.Config{
 
 ## bboltの稼働中バックアップ
 
-store.Backup(ctx, writer)は、開いたままのbboltファイル全体を一貫したスナップショットとして出力します。全レコードのコレクションとBlobのバケットを含みます。writerのCloseとエラー処理は呼び出し側で行い、出力先は別ファイルにしてください。長いバックアップは読み取りトランザクションを保持し、ファイル拡張を待たせる場合があります。キャンセルはWriteの間で確認し、呼び出し側writerの停止中のWriteまでは中断できません。他の保存先はErrUnsupportedを返します。復元時は完成したスナップショットを別パスで開き、そのコピーにbboltのツールで詰め直しを行えます。レコードのRevisionはファイルパスに結び付くため、別パスへ復元した後は再取得してください。
+store.Backup(ctx, writer)は、開いたままのbboltファイル全体を一貫したスナップショットとして出力します。全レコードのコレクションとBlobのバケットを含みます。writerのCloseとエラー処理は呼び出し側で行い、出力先は別ファイルにしてください。Storeのロックは出力前に放すため、遅い出力先でもレコード検索や型登録を待たせません。Closeはbboltの進行中のトランザクションを待ちます。長いバックアップは読み取りトランザクションを保持し、ファイル拡張を待たせる場合があります。キャンセルはWriteの間で確認し、呼び出し側writerの停止中のWriteまでは中断できません。他の保存先はErrUnsupportedを返します。復元時は完成したスナップショットを別パスで開き、そのコピーにbboltのツールで詰め直しを行えます。レコードのRevisionはファイルパスに結び付くため、別パスへ復元した後は再取得してください。
 
 ```go
 // storeはbboltで開いた接続、destinationは別のio.Writer。

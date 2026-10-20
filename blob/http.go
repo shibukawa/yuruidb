@@ -11,6 +11,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"strconv"
 	"sync/atomic"
 	"time"
 
@@ -106,13 +107,27 @@ func (s *httpStore) token(response *http.Response) string {
 	return response.Header.Get("ETag")
 }
 
-// Open returns a streaming body; the caller must close it. JSON response limits
-// do not apply to the body, and no document-sized buffer is allocated.
+// Open reads metadata only. A sequential GET is deferred until the first Read;
+// callers using only ReadAt never open a full-document response body.
 func (s *httpStore) Open(ctx context.Context, id string) (*Reader, error) {
 	if err := s.check(ctx, id); err != nil {
 		return nil, err
 	}
-	req, err := http.NewRequestWithContext(ctx, "GET", s.config.ObjectURL(id), nil)
+	method, target := "HEAD", s.config.ObjectURL(id)
+	if s.config.Generation {
+		// The GCS JSON object resource contains generation and size. Its media
+		// URL is only used once a body or range is actually requested.
+		method = "GET"
+		req, err := http.NewRequestWithContext(ctx, method, target, nil)
+		if err != nil {
+			return nil, yuruidb.ErrInvalid
+		}
+		q := req.URL.Query()
+		q.Del("alt")
+		req.URL.RawQuery = q.Encode()
+		target = req.URL.String()
+	}
+	req, err := http.NewRequestWithContext(ctx, method, target, nil)
 	if err != nil {
 		return nil, yuruidb.ErrInvalid
 	}
@@ -121,13 +136,26 @@ func (s *httpStore) Open(ctx context.Context, id string) (*Reader, error) {
 	if err != nil {
 		return nil, err
 	}
+	defer response.Body.Close()
 	token := s.token(response)
+	size := response.ContentLength
+	if s.config.Generation {
+		var out struct{ Generation, Size string }
+		if err := json.NewDecoder(io.LimitReader(response.Body, 1<<20)).Decode(&out); err != nil {
+			return nil, fmt.Errorf("yuruidb: invalid Blob metadata")
+		}
+		token = out.Generation
+		size, err = strconv.ParseInt(out.Size, 10, 64)
+		if err != nil || size < 0 {
+			return nil, fmt.Errorf("yuruidb: invalid Blob size")
+		}
+	}
 	if token == "" {
-		response.Body.Close()
 		return nil, fmt.Errorf("yuruidb: blob response lacks version")
 	}
-	meta := Metadata{ID: id, Revision: token, Size: response.ContentLength}
-	r := &httpReader{store: s, ctx: ctx, body: response.Body, meta: meta}
+	meta := Metadata{ID: id, Revision: token, Size: size}
+	readCtx, cancel := context.WithCancel(ctx)
+	r := &httpReader{store: s, ctx: readCtx, cancel: cancel, meta: meta}
 	return &Reader{ReadCloser: r, ReaderAt: r, Metadata: meta}, nil
 }
 
