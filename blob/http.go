@@ -24,6 +24,7 @@ type Metadata struct {
 }
 type Reader struct {
 	io.ReadCloser
+	io.ReaderAt
 	Metadata
 }
 
@@ -35,11 +36,16 @@ type HTTPConfig struct {
 	UploadURL         func(string) string
 	Generation        bool
 	ConditionalDelete bool
+	List              func(context.Context, string, int) ([]Metadata, bool, error)
 }
-type Store struct {
+type httpStore struct {
 	config HTTPConfig
 	closed atomic.Bool
 }
+
+type statusError struct{ status int }
+
+func (e *statusError) Error() string { return fmt.Sprintf("yuruidb: blob HTTP %d", e.status) }
 
 func NewHTTP(config HTTPConfig) (*Store, error) {
 	if config.ObjectURL == nil || config.UploadURL == nil {
@@ -48,9 +54,9 @@ func NewHTTP(config HTTPConfig) (*Store, error) {
 	if config.Client == nil {
 		config.Client = &http.Client{Timeout: 5 * time.Minute, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 	}
-	return &Store{config: config}, nil
+	return NewBackend(&httpStore{config: config}, config.ObjectURL(""))
 }
-func (s *Store) check(ctx context.Context, id string) error {
+func (s *httpStore) check(ctx context.Context, id string) error {
 	if s.closed.Load() {
 		return yuruidb.ErrClosed
 	}
@@ -59,8 +65,8 @@ func (s *Store) check(ctx context.Context, id string) error {
 	}
 	return yuruidb.ValidateID(id)
 }
-func (s *Store) Close() error { s.closed.Store(true); return nil }
-func (s *Store) request(req *http.Request, mutation bool) (*http.Response, error) {
+func (s *httpStore) Close() error { s.closed.Store(true); return nil }
+func (s *httpStore) request(req *http.Request, mutation bool) (*http.Response, error) {
 	if s.config.Authorize != nil {
 		if err := s.config.Authorize(req); err != nil {
 			return nil, err
@@ -81,7 +87,7 @@ func (s *Store) request(req *http.Request, mutation bool) (*http.Response, error
 		return response, nil
 	}
 	response.Body.Close()
-	cause := fmt.Errorf("yuruidb: blob HTTP %d", response.StatusCode)
+	cause := &statusError{response.StatusCode}
 	switch response.StatusCode {
 	case 404:
 		return nil, errors.Join(yuruidb.ErrNotFound, cause)
@@ -93,7 +99,7 @@ func (s *Store) request(req *http.Request, mutation bool) (*http.Response, error
 	}
 	return nil, cause
 }
-func (s *Store) token(response *http.Response) string {
+func (s *httpStore) token(response *http.Response) string {
 	if s.config.Generation {
 		return response.Header.Get("X-Goog-Generation")
 	}
@@ -102,7 +108,7 @@ func (s *Store) token(response *http.Response) string {
 
 // Open returns a streaming body; the caller must close it. JSON response limits
 // do not apply to the body, and no document-sized buffer is allocated.
-func (s *Store) Open(ctx context.Context, id string) (*Reader, error) {
+func (s *httpStore) Open(ctx context.Context, id string) (*Reader, error) {
 	if err := s.check(ctx, id); err != nil {
 		return nil, err
 	}
@@ -110,6 +116,7 @@ func (s *Store) Open(ctx context.Context, id string) (*Reader, error) {
 	if err != nil {
 		return nil, yuruidb.ErrInvalid
 	}
+	req.Header.Set("Accept-Encoding", "identity")
 	response, err := s.request(req, false)
 	if err != nil {
 		return nil, err
@@ -119,7 +126,9 @@ func (s *Store) Open(ctx context.Context, id string) (*Reader, error) {
 		response.Body.Close()
 		return nil, fmt.Errorf("yuruidb: blob response lacks version")
 	}
-	return &Reader{ReadCloser: response.Body, Metadata: Metadata{ID: id, Revision: token, Size: response.ContentLength}}, nil
+	meta := Metadata{ID: id, Revision: token, Size: response.ContentLength}
+	r := &httpReader{store: s, ctx: ctx, body: response.Body, meta: meta}
+	return &Reader{ReadCloser: r, ReaderAt: r, Metadata: meta}, nil
 }
 
 type contextReader struct {
@@ -137,7 +146,7 @@ func (r contextReader) Read(p []byte) (int, error) {
 // Insert creates an absent document. Upload input is spooled to a temporary file
 // so SigV4 can hash and replay it without loading the document into memory. The
 // temporary file is removed on every return path. Existing IDs are never replaced.
-func (s *Store) Insert(ctx context.Context, id string, source io.Reader) (Metadata, error) {
+func (s *httpStore) Insert(ctx context.Context, id string, source io.Reader) (Metadata, error) {
 	if err := s.check(ctx, id); err != nil {
 		return Metadata{}, err
 	}
@@ -197,7 +206,7 @@ func (s *Store) Insert(ctx context.Context, id string, source io.Reader) (Metada
 
 // Delete requires the native version returned by Open or Insert. Object IDs
 // should not be reused; unlike record revisions, ETags may repeat for equal bytes.
-func (s *Store) Delete(ctx context.Context, id, revision string) error {
+func (s *httpStore) Delete(ctx context.Context, id, revision string) error {
 	if err := s.check(ctx, id); err != nil {
 		return err
 	}

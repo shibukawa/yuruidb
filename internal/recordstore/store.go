@@ -11,6 +11,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -122,6 +123,22 @@ func (s *Store) Check(ctx context.Context) error {
 	return nil
 }
 func (s *Store) Capabilities() yuruidb.Capabilities { return s.caps }
+
+func (s *Store) Backup(ctx context.Context, w io.Writer) error {
+	if err := s.checkOwner(ctx); err != nil {
+		return err
+	}
+	if w == nil {
+		return yuruidb.ErrInvalid
+	}
+	backup, ok := s.transport.(interface {
+		Backup(context.Context, io.Writer) error
+	})
+	if !ok {
+		return yuruidb.ErrUnsupported
+	}
+	return backup.Backup(ctx, w)
+}
 func (s *Store) Close() error {
 	s.closed.Store(true)
 	s.closeOnce.Do(func() {

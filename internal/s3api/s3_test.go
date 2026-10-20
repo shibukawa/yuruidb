@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/shibukawa/yuruidb"
@@ -15,6 +16,81 @@ import (
 
 func credentials() awsauth.Provider {
 	return awsauth.Static(awsauth.Credentials{AccessKey: "test", SecretKey: "test"})
+}
+
+func TestProbeCleanupFailureCannotPoisonCollection(t *testing.T) {
+	fixture := protocoltest.New(t, "s3")
+	var denyCleanup atomic.Bool
+	denyCleanup.Store(true)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != "GET" && strings.Contains(r.URL.Path, "probe") && !strings.HasPrefix(r.URL.Path, "/bucket/.yuruidb-probes/") {
+			t.Error("probe inside collection")
+		}
+		if r.Method == "DELETE" {
+			if r.Header.Get("If-Match") != "" {
+				w.WriteHeader(405)
+				return
+			}
+			if denyCleanup.Load() {
+				w.WriteHeader(403)
+				return
+			}
+		}
+		fixture.Config.Handler.ServeHTTP(w, r)
+	}))
+	defer server.Close()
+	config := Config{Endpoint: server.URL, Bucket: "bucket", Collection: "items", Credentials: credentials()}
+	if _, err := Open(context.Background(), config, "s3"); err == nil {
+		t.Fatal("missing cleanup failure")
+	}
+	denyCleanup.Store(false)
+	s, err := Open(context.Background(), config, "s3")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	if _, err := s.Insert(context.Background(), "job", []byte("live")); err != nil {
+		t.Fatal(err)
+	}
+	if page, err := s.List(context.Background(), yuruidb.ListOptions{}); err != nil || len(page.Records) != 1 {
+		t.Fatalf("leftover probe broke List: %+v %v", page, err)
+	}
+}
+
+type probeRoundTrip func(*http.Request) (*http.Response, error)
+
+func (f probeRoundTrip) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+
+func TestProbeCleanupSurvivesCancellation(t *testing.T) {
+	fixture := protocoltest.New(t, "s3")
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	puts, cleanups := 0, 0
+	client := &http.Client{Transport: probeRoundTrip(func(r *http.Request) (*http.Response, error) {
+		if r.Method == "PUT" {
+			puts++
+			if puts == 2 {
+				cancel()
+				return nil, context.Canceled
+			}
+		}
+		if r.Method == "DELETE" {
+			cleanups++
+			if r.Context().Err() != nil {
+				t.Error("cleanup inherited canceled context")
+			}
+			if _, ok := r.Context().Deadline(); !ok {
+				t.Error("cleanup missing timeout")
+			}
+		}
+		return http.DefaultTransport.RoundTrip(r)
+	})}
+	if _, err := Open(ctx, Config{Endpoint: fixture.URL, Bucket: "bucket", Collection: "items", Credentials: credentials(), Client: client}, "s3"); err == nil {
+		t.Fatal("expected canceled verification")
+	}
+	if cleanups != 1 {
+		t.Fatalf("cleanup calls=%d", cleanups)
+	}
 }
 func TestRejectEndpointIgnoringConditions(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

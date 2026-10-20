@@ -90,3 +90,24 @@ AWS認証は環境変数の優先、コンテナ/Pod Identityのtoken file、期
 | CGO_ENABLED=0 sh scripts/check-all.sh | 成功 | 両moduleのテストとvet、既存タグビルドと実行例をcgoなしで実行 |
 
 実SQLiteの同一ファイルに独立した2接続を開くconformanceと、実SQLiteでSQLを実行するD1 HTTP fixtureを通過した。race detector自体はcgoを要するため、cgo有効時だけ追加実行する。ドライバ変更による性能比較や実D1への接続は検証していない。
+
+## 結果不明・probe分離・Blob・バックアップの追加対応
+
+2026-10-20、Go 1.27.0、macOS/arm64で`sh scripts/check-all.sh`を通過した。ルートとintegrationのrace・vet、cgo無効のintegrationテスト、9種類のタグ構成、コア依存分離、Linux/arm64クラウド4構成、実行例を確認した。HTTP fixtureのローカルlistenを許可して実行し、Goビルドキャッシュは一時ディレクトリへ置いた。
+
+- 応答喪失後の条件競合と照合失敗はErrOutcomeUnknownだけに分類し、ErrConflict・ErrAlreadyExistsには一致しない。MutationErrorとリモートエラーのerrors.As、contextエラーのerrors.Isを維持する。DynamoDBのHTTP 400流量制限3種は同じ本文・条件で再署名して再試行し、ValidationExceptionは再送しない。
+- S3確認用キーの後片付けが権限で失敗しても、次に開いたコレクションの一覧へ混ざらない。キャンセル後の後片付けには、取り消しを引き継がず期限付きのcontextを渡す。
+- bbolt・S3・R2・GCS共通でBlobの重複拒否、コレクション分離、本文なしのメタデータ一覧とページ送り、並行ReadAt、チャンク境界・末尾、版の差し替え検出、キャンセルとCloseを確認した。HTTPの範囲無視・不正なContent-Range・途中切断・サイズ不明時のEOFも検証した。条件付きDELETE非対応の保存先でも明示的なRemoveで削除できる。
+- 稼働中のbboltをバックアップし、別パスで2つのレコードコレクションとBlobを復元した。元の接続はバックアップ後も更新できる。出力先の失敗と途中キャンセルはerrors.Isで判定できる。bbolt Blobの入力失敗は書き込み済みチャンクごとロールバックする。
+
+bbolt Blobの挿入は単一の書き込みトランザクションで、確定まで変更分のメモリと書き込みロックを保持する。バックアップは読み取りトランザクションを保持する。これらの制約はREADMEと実装ガイドに記載した。実クラウド・IAM・本番負荷・大容量時の性能は今回も未検証。
+
+## SQLのBlob API対応
+
+2026-10-20、Go 1.27.0、macOS/arm64、実SQLiteと一時コンテナのPostgreSQL 18で確認した。drivers/sql.OpenBlobs(ctx, Config)は他の保存先と同じ*blob.Storeを返す。レコードとは別のururidb_blobsテーブルへ、SQLiteはBLOB、PostgreSQLはBYTEAで本文を保存する。
+
+Blobの共通テストをinternal/conformance.RunBlobsへ移し、bbolt・S3・R2・GCS・SQLite・PostgreSQLに同じケースを適用した。ストリーミング、並行ReadAt、ページ送り、コレクション分離、条件付き削除、無条件削除、ID再作成後の古いReader、contextとCloseを確認した。SQL固有の検証では、全256種類のバイトを含む本文、バイト単位の範囲取得、空の文書、入力失敗時の不在、同じIDへの8並行挿入で成功が1件だけになること、同じ本文を再作成した後の古いRevisionでの削除拒否を確認した。SQLiteではレコードとBlobの同名IDの分離とDBの借用・所有も検証した。
+
+YURUIDB_POSTGRES_DSNを設定したsh scripts/check-all.shを通過した。ルートとintegrationのrace・vet、cgo無効の統合テスト、9種類のタグ構成、コア依存分離、Linux/arm64のクラウド4構成、実行例を含む。PostgreSQL用lib/pq v1.12.3はintegration moduleのみに追加し、ルートgo.modは変更していない。通常の統合テストはDSN未設定ならPostgreSQLのケースだけをスキップする。
+
+SQL版のInsertは本文全体をメモリへ読み込んでから1つのINSERTで作成する。OpenとListはメタデータだけを読み、Read・ReadAtはSQLのsubstrで範囲を取得する。DB固有のサイズ上限と、大容量時のメモリ・性能には別途運用上の検討が必要である。PostgreSQLのレコードconformanceは今回の検証範囲には含めていない。

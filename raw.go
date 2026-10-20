@@ -20,6 +20,7 @@ var (
 	ErrClosed        = errors.New("yuruidb: store closed")
 	// ErrOutcomeUnknown means a remote mutation may have committed. Do not retry
 	// with a different ID or revision without reconciling the outcome.
+	// Built-in drivers exclude ErrConflict/ErrAlreadyExists from unknown outcomes.
 	ErrOutcomeUnknown = errors.New("yuruidb: mutation outcome unknown")
 )
 
@@ -113,7 +114,8 @@ type CollectionOpener interface {
 
 // MutationError preserves the identity of an attempted mutation for later
 // reconciliation. Nonce is stored in the envelope; AttemptedRevision may omit
-// a native token when the response was lost. Unwrap preserves errors.Is.
+// a native token when the response was lost. Unwrap preserves diagnostic Is/As
+// queries except definitive ErrConflict and ErrAlreadyExists classifications.
 type MutationError struct {
 	Operation, Collection, ID, Nonce, ExpectedRevision, AttemptedRevision string
 	Cause                                                                 error
@@ -122,7 +124,26 @@ type MutationError struct {
 func (e *MutationError) Error() string {
 	return "yuruidb: " + e.Operation + " outcome unknown for " + e.Collection + "/" + e.ID
 }
-func (e *MutationError) Unwrap() error { return errors.Join(ErrOutcomeUnknown, e.Cause) }
+func (e *MutationError) Unwrap() error { return OutcomeUnknown(e.Cause) }
+
+// OutcomeUnknown preserves diagnostic causes while excluding definitive conflict
+// and duplicate classifications. A retry's failed condition cannot establish
+// whether an earlier request committed. Other Is/As queries still reach cause.
+func OutcomeUnknown(cause error) error { return &unknownOutcome{cause} }
+
+type unknownOutcome struct{ cause error }
+
+func (e *unknownOutcome) Error() string {
+	if e.cause == nil {
+		return ErrOutcomeUnknown.Error()
+	}
+	return ErrOutcomeUnknown.Error() + ": " + e.cause.Error()
+}
+func (e *unknownOutcome) Unwrap() error { return ErrOutcomeUnknown }
+func (e *unknownOutcome) Is(target error) bool {
+	return target != ErrConflict && target != ErrAlreadyExists && errors.Is(e.cause, target)
+}
+func (e *unknownOutcome) As(target any) bool { return errors.As(e.cause, target) }
 
 // MatchesRevision reports whether a retrieved revision identifies this exact
 // attempted write, ignoring a native token unavailable after response loss.

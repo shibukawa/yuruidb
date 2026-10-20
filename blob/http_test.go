@@ -13,6 +13,7 @@ import (
 	"github.com/shibukawa/yuruidb"
 	"github.com/shibukawa/yuruidb/auth"
 	awsauth "github.com/shibukawa/yuruidb/auth/aws"
+	"github.com/shibukawa/yuruidb/blob"
 	"github.com/shibukawa/yuruidb/drivers/gcs"
 	"github.com/shibukawa/yuruidb/drivers/s3"
 	"github.com/shibukawa/yuruidb/internal/protocoltest"
@@ -137,5 +138,47 @@ func TestGCSStreamingGeneration(t *testing.T) {
 	}
 	if err = store.Delete(context.Background(), meta.ID, meta.Revision); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestRangeResponseValidation(t *testing.T) {
+	for _, tc := range []struct {
+		name               string
+		status             int
+		contentRange, body string
+		want               error
+	}{
+		{"range ignored", 200, "", "whole document", yuruidb.ErrUnsupported},
+		{"invalid start", 206, "bytes 0-3/8", "abcd", nil},
+		{"premature short range", 206, "bytes 2-3/8", "cd", nil},
+		{"truncated transfer", 206, "bytes 2-5/8", "c", io.ErrUnexpectedEOF},
+		{"unknown size EOF", 416, "bytes */2", "", io.EOF},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s, err := blob.NewHTTP(blob.HTTPConfig{ObjectURL: func(string) string { return "https://example.invalid/document" }, UploadURL: func(string) string { return "https://example.invalid/document" }, Client: &http.Client{Transport: roundTrip(func(r *http.Request) (*http.Response, error) {
+				h := http.Header{"Etag": {`"v1"`}}
+				if r.Header.Get("Range") == "" {
+					return &http.Response{StatusCode: 200, Header: h, ContentLength: -1, Body: io.NopCloser(strings.NewReader("document"))}, nil
+				}
+				if r.Header.Get("Range") != "bytes=2-5" || r.Header.Get("If-Match") != `"v1"` {
+					t.Error("missing range or version guard")
+				}
+				h.Set("Content-Range", tc.contentRange)
+				return &http.Response{StatusCode: tc.status, Header: h, Body: io.NopCloser(strings.NewReader(tc.body))}, nil
+			})}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer s.Close()
+			r, err := s.Open(context.Background(), "document")
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer r.Close()
+			_, err = r.ReadAt(make([]byte, 4), 2)
+			if err == nil || (tc.want != nil && !errors.Is(err, tc.want)) {
+				t.Fatalf("invalid range result: %v", err)
+			}
+		})
 	}
 }

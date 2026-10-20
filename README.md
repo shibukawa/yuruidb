@@ -4,7 +4,7 @@
 
 A Go 1.27+ record storage library with interchangeable, statically imported backends. One `Store` owns a connection; generic methods select the registered data type and collection. JSON data uses `Record[T]` and `Page[T]`. IDs may be validated names or generated UUIDv7 strings. Listing uses ascending ID byte order.
 
-Cloud drivers use standard-library HTTP, without cloud SDK dependencies. The core has no external imports. bbolt is an optional driver dependency; pure-Go SQLite test dependencies live in the separate [integration module](integration).
+Cloud drivers use standard-library HTTP, without cloud SDK dependencies. The core has no external imports. bbolt is an optional driver dependency; pure-Go SQL test dependencies live in the separate [integration module](integration).
 
 The module path is `github.com/shibukawa/yuruidb`.
 
@@ -51,7 +51,7 @@ See [examples/basic](examples/basic/main.go) for runnable error handling. Driver
 
 ## Unknown outcomes
 
-A conditional mutation may commit even if its response is lost. The record layer attempts a readback when context and consistency permit. If it finds the attempted nonce, it returns success. Otherwise, `errors.Is(err, yuruidb.ErrOutcomeUnknown)` remains true and `errors.As` exposes `*yuruidb.MutationError` with the operation, collection, ID, nonce, expected revision, and attempted revision.
+A conditional mutation may commit even if its response is lost. The record layer attempts a readback when context and consistency permit. If it finds the attempted nonce, it returns success. Otherwise, `errors.Is(err, yuruidb.ErrOutcomeUnknown)` remains true; `ErrConflict` and `ErrAlreadyExists` do not match, even when a replay encountered a failed condition. Do not reapply the mutation before reconciling its outcome. `errors.As` exposes `*yuruidb.MutationError` with the operation, collection, ID, nonce, expected revision, and attempted revision.
 
 ```go
 var attempt *yuruidb.MutationError
@@ -83,19 +83,50 @@ A mismatch does not prove failure: another writer may already have superseded it
 
 Connection configs omit `Collection` for the typed Store; `OpenRaw` can still select one collection. HTTP clients and authorizers are injectable. AWS's default credential provider checks environment credentials, web identity/STS (EKS IRSA), container credentials (ECS/EKS Pod Identity), then EC2 IMDSv2, caching and refreshing temporary credentials. Profiles and SSO remain caller-injected. Region order is explicit config, `AWS_REGION`, `AWS_DEFAULT_REGION`, then `us-east-1`; R2 defaults to `auto`.
 
-AWS S3 uses virtual hosting by default for suitable bucket names; dotted names use path style for TLS compatibility. `AddressStyle` can be `auto`, `virtual`, or `path`. Custom endpoints default to path style. Opening a custom S3/R2 endpoint creates temporary probe keys, verifies conditional creation/replacement, concurrent CAS, and conditional deletion, then cleans up. IAM must allow these probe operations. Ignored PUT conditions fail `Open`; unsupported/ignored DELETE conditions select tombstones. Set `VerifyConditions: true` to probe AWS endpoints as well. `s3.Verify`/`r2.Verify` expose a diagnostic report. Probes are bounded observations, not a proof of every service guarantee.
+AWS S3 uses virtual hosting by default for suitable bucket names; dotted names use path style for TLS compatibility. `AddressStyle` can be `auto`, `virtual`, or `path`. Custom endpoints default to path style. Opening a custom S3/R2 endpoint creates temporary probe keys under `.yuruidb-probes/` outside every valid collection, verifies conditional creation/replacement, concurrent CAS, and conditional deletion, then cleans up. Cleanup uses a cancellation-independent context with a 10-second timeout. Cleanup failures fail `Open`, and any leftover probe cannot enter a record listing. IAM must allow these probe operations under the reserved prefix. Ignored PUT conditions fail `Open`; unsupported/ignored DELETE conditions select tombstones. Set `VerifyConditions: true` to probe AWS endpoints as well. `s3.Verify`/`r2.Verify` expose a diagnostic report. Probes are bounded observations, not a proof of every service guarantee.
 
-Transient HTTP 429/500/502/503/504 responses receive bounded backoff with jitter and fresh authorization. Only conditional mutations are replayed, with unchanged body and condition. Unconditional KV writes and D1 mutations are not blindly retried. `Retry-After` is respected; long minimum delays return the error. JSON responses are limited to 32 MiB; provider limits and encoding overhead can be smaller. Oversized S3/GCS record writes are rejected before upload.
+Transient HTTP 429/500/502/503/504 responses receive bounded backoff with jitter and fresh authorization. DynamoDB also retries HTTP 400 `ThrottlingException`, `ProvisionedThroughputExceededException`, and `RequestLimitExceeded` responses ([AWS error reference](https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/Programming.Errors.html)). Only conditional mutations are replayed, with unchanged body and condition. Unconditional KV writes and D1 mutations are not blindly retried. `Retry-After` is respected; long minimum delays return the error. JSON responses are limited to 32 MiB; provider limits and encoding overhead can be smaller. Oversized S3/GCS record writes are rejected before upload.
 
 ## Streaming documents
 
-`s3.OpenBlobs`, `r2.OpenBlobs`, and `gcs.OpenBlobs` open a separate, explicitly named collection for immutable documents. `Insert(ctx, id, io.Reader)` spools input to a temporary file for bounded-memory signing/replay; `Open(ctx, id)` returns a streaming reader the caller must close. The JSON response limit does not apply. Store the returned ID/version reference in a small typed record. Use fresh IDs; native blob ETags can repeat for identical bytes, unlike random record revisions. Conditional blob `Delete` requires its returned version and backend support. Document and record operations do not form a transaction.
+`sql.OpenBlobs`, `bbolt.OpenBlobs`, `s3.OpenBlobs`, `r2.OpenBlobs`, and `gcs.OpenBlobs` open an explicitly named collection for immutable documents. `Insert(ctx, id, io.Reader)` creates an absent ID; HTTP uploads spool to a temporary file for bounded-memory signing/replay. bbolt stores 64 KiB chunks in reserved `.yuruidb-blobs/<collection>` buckets in the shared file, isolated from record buckets. A bbolt insert uses one write transaction, retaining pending bytes in memory and holding the writer until commit. The JSON response limit does not apply.
+
+`Open(ctx, id)` returns a streaming reader that also implements `io.ReaderAt`; keep its context alive and close it when finished. HTTP `ReadAt` sends a range request guarded by the observed ETag/generation; an endpoint ignoring ranges returns `ErrUnsupported`. bbolt range reads use short read transactions. `List(ctx, yuruidb.ListOptions{Limit: 100})` returns `blob.Page{Blobs: []blob.Metadata, Cursor: ...}` in ascending ID order, including version and size, without downloading bodies. Use the cursor for the next page and compare IDs with record references to find possible orphans. Pages have no snapshot guarantee; coordinate cleanup with producers so pending uploads are not deleted.
+
+Store the returned ID/version reference in a small typed record. Use fresh IDs; native blob ETags can repeat for identical bytes. Conditional `Delete(ctx, id, revision)` requires backend support. Explicit `Remove(ctx, id)` performs an unconditional deletion even without conditional DELETE support; only use it when IDs are never reused. Document and record operations do not form a transaction.
 
 ```go
 blobs, err := s3.OpenBlobs(ctx, s3.Config{Bucket: "spool", Collection: "documents"})
 meta, err := blobs.Insert(ctx, documentID, sourceReader)
 reader, err := blobs.Open(ctx, meta.ID)
 defer reader.Close()
+buf := make([]byte, 4096)
+n, err := reader.ReadAt(buf, 1024)
+page, err := blobs.List(ctx, yuruidb.ListOptions{Limit: 100})
+// Conditional deletion: blobs.Delete(ctx, meta.ID, meta.Revision)
+// With never-reused IDs: blobs.Remove(ctx, meta.ID)
+```
+
+SQL Blob stores use the existing SQL driver's `Config` and return the same `*blob.Store`. The default table is `ururidb_blobs`, separate from `ururidb_records`; custom `Table` names must also remain separate. With `AutoMigrate: true`, SQLite creates a `BLOB` column and PostgreSQL a `BYTEA` column. Bodies are stored as binary, without JSON/base64 wrapping. `Open` and `List` read metadata only; `Read` and `ReadAt` fetch byte ranges with SQL `substr` ([SQLite](https://www.sqlite.org/lang_corefunc.html), [PostgreSQL](https://www.postgresql.org/docs/current/functions-binarystring.html)). Each range checks the random revision, so reads detect ID replacement. SQL inserts buffer the entire input in memory and use one atomic insert; database size limits still apply.
+
+```go
+// sqldriver is github.com/shibukawa/yuruidb/drivers/sql.
+blobs, err := sqldriver.OpenBlobs(ctx, sqldriver.Config{
+    DB: db, Dialect: "postgres", Collection: "documents", AutoMigrate: true,
+    Identity: "my-app-primary",
+})
+// Insert/Open/ReadAt/List/Delete/Remove are identical across Blob backends.
+```
+
+An injected SQL DB is borrowed by default. When sharing it between record and Blob stores, keep `CloseDB: false` and close the DB after both stores. Assign distinct stable `Identity` values to different databases to keep their cursors separate. Record and Blob operations remain separate transactions.
+
+## Live bbolt backup
+
+`store.Backup(ctx, writer)` exports a consistent snapshot of the whole bbolt file while it remains open, including every record collection and Blob bucket. The caller closes the writer and handles its errors. Write to a separate file; a long backup retains a read transaction and can delay file growth. Cancellation is checked between writes and cannot interrupt a blocked caller-provided writer. Other backends return `ErrUnsupported`. Restore by opening the completed snapshot at a new path; use bbolt tools on that snapshot for compaction. Record revisions are scoped to the file path; retrieve them again after restoring at a different path.
+
+```go
+// store was opened with the bbolt driver; destination is a separate io.Writer.
+err = store.Backup(ctx, destination)
 ```
 
 ## Static imports and build tags
@@ -124,4 +155,4 @@ go vet ./...
 python3 scripts/check-builds.py
 ```
 
-Both modules work without cgo. The integration module alone depends on the pure-Go modernc.org/sqlite driver. Tests exercise actual bbolt/SQLite and independent HTTP fixtures, including response loss, stale writers after recreation, multi-collection access, 2000-to-10 record deletion, cloud credential flows, compatibility probes, and 34 MiB streaming. Live cloud services, actual PostgreSQL, IAM, and production performance remain unverified. See the [implementation guide](docs/implementation.ja.md) and [validation history](docs/implementation-validation.md).
+Both modules work without cgo. The integration module alone depends on the pure-Go modernc.org/sqlite and PostgreSQL lib/pq drivers. Tests exercise actual bbolt/SQLite and independent HTTP fixtures, including response loss, stale writers after recreation, multi-collection access, 2000-to-10 record deletion, cloud credential flows, compatibility probes, and 34 MiB streaming. Live PostgreSQL Blob tests run when `YURUIDB_POSTGRES_DSN` is set; see [integration](integration/README.md). Live cloud services, PostgreSQL record conformance, IAM, and production performance remain unverified. See the [implementation guide](docs/implementation.ja.md) and [validation history](docs/implementation-validation.md).

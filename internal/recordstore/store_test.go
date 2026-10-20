@@ -45,7 +45,7 @@ func (c *counting) WriteItem(ctx context.Context, key string, b []byte, token st
 		c.afterWrite()
 	}
 	if c.unknown {
-		return "", yuruidb.ErrOutcomeUnknown
+		return "", errors.Join(yuruidb.ErrOutcomeUnknown, yuruidb.ErrConflict)
 	}
 	return next, nil
 }
@@ -145,7 +145,7 @@ func TestResponseLossAndReconciliation(t *testing.T) {
 	c.unreadable = true
 	_, err = s.Update(ctx, "job", []byte("unreadable-response"), next.Revision)
 	var unknown *yuruidb.MutationError
-	if !errors.Is(err, yuruidb.ErrOutcomeUnknown) || !errors.As(err, &unknown) || unknown.Operation != "update" || unknown.Nonce == "" || unknown.ExpectedRevision != next.Revision {
+	if !errors.Is(err, yuruidb.ErrOutcomeUnknown) || errors.Is(err, yuruidb.ErrConflict) || !errors.As(err, &unknown) || unknown.Operation != "update" || unknown.Nonce == "" || unknown.ExpectedRevision != next.Revision {
 		t.Fatalf("unknown outcome: %+v", err)
 	}
 	c.unreadable = false

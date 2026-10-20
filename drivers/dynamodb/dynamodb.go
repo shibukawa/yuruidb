@@ -62,7 +62,7 @@ func OpenRaw(ctx context.Context, c Config) (yuruidb.RawStore, error) {
 	if authorize == nil {
 		authorize = awsauth.Signer(c.Region, "dynamodb", c.Credentials)
 	}
-	t := &transport{httpx.Client{HTTP: c.Client, Auth: authorize}, endpoint, c.Table, c.Collection}
+	t := &transport{httpx.Client{HTTP: c.Client, Auth: authorize, Retryable: retryable}, endpoint, c.Table, c.Collection}
 	return recordstore.New(t, c.Collection, "dynamodb:"+endpoint+"/"+c.Table, yuruidb.Capabilities{ConditionalMutations: true, Distributed: true, StrongReads: true})
 }
 func (t *transport) call(ctx context.Context, op string, input, output any, mutation bool) error {
@@ -76,7 +76,7 @@ func (t *transport) call(ctx context.Context, op string, input, output any, muta
 		var remote struct {
 			Type string `json:"__type"`
 		}
-		if json.Unmarshal(r.Body, &remote) == nil && strings.HasSuffix(remote.Type, "ConditionalCheckFailedException") {
+		if !errors.Is(err, yuruidb.ErrOutcomeUnknown) && json.Unmarshal(r.Body, &remote) == nil && strings.HasSuffix(remote.Type, "ConditionalCheckFailedException") {
 			return errors.Join(yuruidb.ErrConflict, err)
 		}
 		return err
@@ -88,6 +88,26 @@ func (t *transport) call(ctx context.Context, op string, input, output any, muta
 		return fmt.Errorf("yuruidb: malformed DynamoDB response")
 	}
 	return nil
+}
+
+// DynamoDB reports capacity throttling as HTTP 400 rather than 429.
+func retryable(response httpx.Response, err error) bool {
+	var remote *httpx.Error
+	if !errors.As(err, &remote) || remote.Status != 400 {
+		return false
+	}
+	var body struct {
+		Type string `json:"__type"`
+	}
+	if json.Unmarshal(response.Body, &body) != nil {
+		return false
+	}
+	code := body.Type[strings.LastIndex(body.Type, "#")+1:]
+	switch code {
+	case "ThrottlingException", "ProvisionedThroughputExceededException", "RequestLimitExceeded":
+		return true
+	}
+	return false
 }
 func (t *transport) key(k string) map[string]attribute {
 	return map[string]attribute{"pk": {S: t.collection}, "sk": {S: k}}

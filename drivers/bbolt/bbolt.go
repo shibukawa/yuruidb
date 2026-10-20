@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -65,7 +66,7 @@ func canonicalPath(path string) (string, error) {
 	}
 	return filepath.Join(parent, filepath.Base(p)), nil
 }
-func OpenRaw(ctx context.Context, c Config) (yuruidb.RawStore, error) {
+func openTransport(ctx context.Context, c Config) (*transport, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -115,7 +116,15 @@ func OpenRaw(ctx context.Context, c Config) (yuruidb.RawStore, error) {
 			return nil, err
 		}
 	}
-	s, err := recordstore.New(t, c.Collection, "bbolt:"+path, yuruidb.Capabilities{ConditionalMutations: true, StrongReads: true})
+	return t, nil
+}
+
+func OpenRaw(ctx context.Context, c Config) (yuruidb.RawStore, error) {
+	t, err := openTransport(ctx, c)
+	if err != nil {
+		return nil, err
+	}
+	s, err := recordstore.New(t, c.Collection, "bbolt:"+t.path, yuruidb.Capabilities{ConditionalMutations: true, StrongReads: true})
 	if err != nil {
 		t.Close()
 	}
@@ -270,6 +279,42 @@ func mapError(err error) error {
 		return yuruidb.ErrClosed
 	}
 	return err
+}
+
+type backupWriter struct {
+	ctx context.Context
+	w   io.Writer
+	err error
+}
+
+func (w *backupWriter) Write(p []byte) (int, error) {
+	if err := w.ctx.Err(); err != nil {
+		w.err = err
+		return 0, err
+	}
+	n, err := w.w.Write(p)
+	if n < len(p) && err == nil {
+		err = io.ErrShortWrite
+	}
+	if err != nil {
+		w.err = err
+	}
+	return n, err
+}
+
+func (t *transport) Backup(ctx context.Context, w io.Writer) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	return mapError(t.db.View(func(tx *bolt.Tx) error {
+		writer := &backupWriter{ctx: ctx, w: w}
+		_, err := tx.WriteTo(writer)
+		// bbolt formats some WriteTo errors without wrapping their causes.
+		if writer.err != nil {
+			return fmt.Errorf("yuruidb: bbolt backup: %w", writer.err)
+		}
+		return err
+	}))
 }
 func Open(ctx context.Context, c Config) (*yuruidb.Store, error) {
 	raw, err := OpenRaw(ctx, c)

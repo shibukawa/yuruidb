@@ -24,6 +24,8 @@ type Client struct {
 	Auth auth.Authorizer
 	// MaxAttempts defaults to three; a negative value disables retries.
 	MaxAttempts int
+	// Retryable adds provider-specific transient response classifications.
+	Retryable func(Response, error) bool
 }
 type Response struct {
 	Body   []byte
@@ -160,7 +162,11 @@ func (c Client) Do(ctx context.Context, method, target string, body []byte, head
 		}
 		ambiguous = ambiguous || errors.Is(err, yuruidb.ErrOutcomeUnknown)
 		var remote *Error
-		if !errors.As(err, &remote) || (remote.Status != 429 && remote.Status != 500 && remote.Status != 502 && remote.Status != 503 && remote.Status != 504) || attempt+1 == attempts {
+		retry := errors.As(err, &remote) && (remote.Status == 429 || remote.Status == 500 || remote.Status == 502 || remote.Status == 503 || remote.Status == 504)
+		if c.Retryable != nil {
+			retry = retry || c.Retryable(response, err)
+		}
+		if !retry || attempt+1 == attempts {
 			break
 		}
 		delay := time.Duration(25*(1<<min(attempt, 5))) * time.Millisecond
@@ -190,7 +196,7 @@ func (c Client) Do(ctx context.Context, method, target string, body []byte, head
 		}
 	}
 	if ambiguous && mutation {
-		err = errors.Join(yuruidb.ErrOutcomeUnknown, err)
+		err = yuruidb.OutcomeUnknown(err)
 	}
 	return response, err
 }

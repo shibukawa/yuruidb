@@ -51,7 +51,7 @@ TにはJSONにできる構造体、ポインタ、map、slice、スカラー、`
 
 ## 書き込み結果が不明な場合
 
-応答が失われても書き込みが成功している場合があります。レコード層はcontextと整合性が許す範囲で読み直し、試行したnonceが保存されていれば成功を返します。それ以外は`ErrOutcomeUnknown`を維持し、`errors.As`で`*yuruidb.MutationError`を取得できます。操作名・コレクション・ID・nonce・期待Revision・試行Revisionを含みます。
+応答が失われても書き込みが成功している場合があります。レコード層はcontextと整合性が許す範囲で読み直し、試行したnonceが保存されていれば成功を返します。それ以外は`ErrOutcomeUnknown`を維持し、再送が条件競合になっても`ErrConflict`・`ErrAlreadyExists`には一致させません。結果を照合するまでは同じ変更を再適用しないでください。`errors.As`で`*yuruidb.MutationError`を取得できます。操作名・コレクション・ID・nonce・期待Revision・試行Revisionを含みます。
 
 ```go
 var attempt *yuruidb.MutationError
@@ -83,19 +83,50 @@ if errors.As(err, &attempt) {
 
 型付きStoreの接続設定ではCollectionを省き、Bindで登録します。OpenRawは従来どおり単一コレクションも指定できます。HTTPクライアントと認証は注入できます。AWSの既定認証は環境変数、web identity/STS（EKS IRSA）、コンテナ認証（ECS/EKS Pod Identity）、EC2 IMDSv2の順に探し、期限付き資格情報をキャッシュ・更新します。profile・SSOはProviderの注入で対応します。地域は明示設定、AWS_REGION、AWS_DEFAULT_REGION、us-east-1の順です。R2はautoを既定にします。
 
-AWS S3は適切なbucket名ならvirtual-hostedを既定にし、ドット入りbucketはTLS互換性のためpath-styleを使います。AddressStyleにauto・virtual・pathを指定できます。独自endpointはpath-styleを既定にします。独自S3/R2 endpointのOpenでは一時キーを作り、条件付き作成・置換・並行CAS・削除を検証して掃除します。このため検証操作のIAM権限も必要です。PUT条件を無視する保存先はOpenを失敗させます。DELETE条件に対応しない、または無視する保存先は墓標に切り替えます。AWS側も検証したい場合はVerifyConditions: trueを指定します。s3.Verify・r2.Verifyは診断結果を返します。有限の検証なので、すべての競合条件の保証を実証するものではありません。
+AWS S3は適切なbucket名ならvirtual-hostedを既定にし、ドット入りbucketはTLS互換性のためpath-styleを使います。AddressStyleにauto・virtual・pathを指定できます。独自endpointはpath-styleを既定にします。独自S3/R2 endpointのOpenでは有効な全コレクションの外側の`.yuruidb-probes/`に一時キーを作り、条件付き作成・置換・並行CAS・削除を検証して掃除します。後片付けにはcontext.WithoutCancelと10秒の期限を使い、失敗した場合はOpenも失敗します。キーが残ってもレコード一覧には混ざりません。予約prefixへの検証操作をIAMで許可してください。PUT条件を無視する保存先はOpenを失敗させます。DELETE条件に対応しない、または無視する保存先は墓標に切り替えます。AWS側も検証したい場合はVerifyConditions: trueを指定します。s3.Verify・r2.Verifyは診断結果を返します。有限の検証なので、すべての競合条件の保証を実証するものではありません。
 
-一時的なHTTP 429/500/502/503/504には上限付きbackoff・jitterと再署名を使います。書き込みの再送対象は条件付き操作で、本文と条件は変えません。無条件KV書き込みとD1の変更操作は無条件に再試行しません。Retry-Afterの最小待機時間を尊重し、長い待機を求められた場合はエラーを返します。JSON応答上限は32MiBで、サービスの制限や符号化により実際の値はさらに小さくなります。S3/GCSでこの上限を超えるレコードは送信前に拒否します。
+一時的なHTTP 429/500/502/503/504には上限付きbackoff・jitterと再署名を使います。DynamoDBはHTTP 400のThrottlingException・ProvisionedThroughputExceededException・RequestLimitExceededも再試行します（[AWSのエラー仕様](https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/Programming.Errors.html)）。書き込みの再送対象は条件付き操作で、本文と条件は変えません。無条件KV書き込みとD1の変更操作は無条件に再試行しません。Retry-Afterの最小待機時間を尊重し、長い待機を求められた場合はエラーを返します。JSON応答上限は32MiBで、サービスの制限や符号化により実際の値はさらに小さくなります。S3/GCSでこの上限を超えるレコードは送信前に拒否します。
 
 ## 大きな文書
 
-s3.OpenBlobs・r2.OpenBlobs・gcs.OpenBlobsで、レコードと別のコレクションに変更しない文書を保存できます。Insert(ctx, id, io.Reader)は署名と再送用に一時ファイルへ入力を退避し、メモリ使用を文書全体のサイズに依存させません。Open(ctx, id)はストリーミングのReaderを返し、呼び出し側がCloseします。JSON応答上限は適用しません。小さな型付きレコードには文書のID・版の参照を置きます。BlobのETagは同じ内容で再利用され得るため、IDは再利用せず新しく生成してください。条件付きDeleteには返された版と保存先の対応が必要です。文書とレコードの操作をまたぐトランザクションはありません。
+sql.OpenBlobs・bbolt.OpenBlobs・s3.OpenBlobs・r2.OpenBlobs・gcs.OpenBlobsで、明示したコレクションに変更しない文書を保存できます。Insert(ctx, id, io.Reader)は未使用のIDを作成します。HTTP版は署名と再送用に一時ファイルへ入力を退避し、文書全体をメモリへ読み込みません。bbolt版は同じファイルの予約バケット`.yuruidb-blobs/<collection>`へ64KiBずつ保存し、レコード用バケットから分離します。bboltの挿入は単一の書き込みトランザクションで行うため、確定まで入力分のメモリと書き込みロックを保持します。レコード用のJSON応答上限は適用しません。
+
+Open(ctx, id)の戻り値はストリーミングに加えてio.ReaderAtにも対応します。読み終えるまでcontextを有効に保ち、Closeしてください。HTTPのReadAtは取得時のETag・generationを条件に範囲を読み、範囲指定を無視する保存先ではErrUnsupportedを返します。bboltは短い読み取りトランザクションを使います。List(ctx, yuruidb.ListOptions{Limit: 100})は本文を読まず、ID順のblob.Page（BlobsとCursor）を返します。各要素はID・Revision・Sizeを持ち、次ページにはCursorを渡します。レコードの参照と比較して孤立候補を探せますが、ページ間のスナップショットはありません。保存途中のBlobを削除しないよう、掃除と書き込みを呼び出し側で調整してください。
+
+小さな型付きレコードには文書のID・版の参照を置きます。BlobのETagは同じ内容で再利用され得るため、IDは再利用せず新しく生成してください。条件付きDelete(ctx, id, revision)には保存先の対応が必要です。明示的なRemove(ctx, id)は条件付きDELETE非対応でも無条件に削除します。IDを再利用しない運用で使ってください。文書とレコードの操作をまたぐトランザクションはありません。
 
 ```go
 blobs, err := s3.OpenBlobs(ctx, s3.Config{Bucket: "spool", Collection: "documents"})
 meta, err := blobs.Insert(ctx, documentID, sourceReader)
 reader, err := blobs.Open(ctx, meta.ID)
 defer reader.Close()
+buf := make([]byte, 4096)
+n, err := reader.ReadAt(buf, 1024)
+page, err := blobs.List(ctx, yuruidb.ListOptions{Limit: 100})
+// 条件付き削除: blobs.Delete(ctx, meta.ID, meta.Revision)
+// IDを再利用しない場合: blobs.Remove(ctx, meta.ID)
+```
+
+SQL版は既存のSQLドライバと同じConfigを受け取り、共通の*blob.Storeを返します。既定テーブルはururidb_blobsで、レコード用のururidb_recordsとは別です。Tableを指定する場合も別のテーブルにしてください。AutoMigrate: trueなら、SQLiteはBLOB列、PostgreSQLはBYTEA列を作成します。本文はJSONやbase64で包まずバイナリで保存します。OpenとListはメタデータだけを読み、Read・ReadAtはSQLのsubstrで必要なバイト範囲を取得します（[SQLite](https://www.sqlite.org/lang_corefunc.html)、[PostgreSQL](https://www.postgresql.org/docs/current/functions-binarystring.html)）。範囲を読むたびに乱数Revisionを確認し、IDの差し替えを検出します。SQL版の挿入は入力全体をメモリに読み込んでから単一のINSERTを行い、保存先DBのサイズ上限にも従います。
+
+```go
+// sqldriverはgithub.com/shibukawa/yuruidb/drivers/sql。
+blobs, err := sqldriver.OpenBlobs(ctx, sqldriver.Config{
+    DB: db, Dialect: "postgres", Collection: "documents", AutoMigrate: true,
+    Identity: "my-app-primary",
+})
+// Insert/Open/ReadAt/List/Delete/Removeは他のBlob保存先と共通。
+```
+
+注入したSQL DBは既定で借用します。レコードとBlobで共有する場合はCloseDB: falseにし、両方を閉じた後でDBを閉じてください。異なるDBには安定した別のIdentityを付け、カーソルの流用を防いでください。レコードとBlobの操作はそれぞれ別のトランザクションです。
+
+## bboltの稼働中バックアップ
+
+store.Backup(ctx, writer)は、開いたままのbboltファイル全体を一貫したスナップショットとして出力します。全レコードのコレクションとBlobのバケットを含みます。writerのCloseとエラー処理は呼び出し側で行い、出力先は別ファイルにしてください。長いバックアップは読み取りトランザクションを保持し、ファイル拡張を待たせる場合があります。キャンセルはWriteの間で確認し、呼び出し側writerの停止中のWriteまでは中断できません。他の保存先はErrUnsupportedを返します。復元時は完成したスナップショットを別パスで開き、そのコピーにbboltのツールで詰め直しを行えます。レコードのRevisionはファイルパスに結び付くため、別パスへ復元した後は再取得してください。
+
+```go
+// storeはbboltで開いた接続、destinationは別のio.Writer。
+err = store.Backup(ctx, destination)
 ```
 
 ## static importとビルドタグ
@@ -124,4 +155,4 @@ go vet ./...
 python3 scripts/check-builds.py
 ```
 
-両moduleともcgoは不要です。integration moduleだけが純Goのmodernc.org/sqliteに依存します。実bbolt・SQLiteと独立したHTTP fixtureで、応答喪失、再作成後の古い書き込み、複数コレクション、2000件から10件への削除、認証フロー、互換性診断、34MiBの文書を検証します。実クラウド・実PostgreSQL・IAM・本番性能は未検証です。[実装ガイド](docs/implementation.ja.md)と[検証履歴](docs/implementation-validation.md)も参照してください。
+両moduleともcgoは不要です。integration moduleだけが純Goのmodernc.org/sqliteとPostgreSQL用lib/pqに依存します。実bbolt・SQLiteと独立したHTTP fixtureで、応答喪失、再作成後の古い書き込み、複数コレクション、2000件から10件への削除、認証フロー、互換性診断、34MiBの文書を検証します。YURUIDB_POSTGRES_DSNを指定すると実PostgreSQLのBlobテストも実行します（[統合テスト](integration/README.md)）。実クラウド・PostgreSQLのレコードconformance・IAM・本番性能は未検証です。[実装ガイド](docs/implementation.ja.md)と[検証履歴](docs/implementation-validation.md)も参照してください。
