@@ -70,7 +70,7 @@ if errors.As(err, &attempt) {
 | ドライバ | 主な接続設定 | 条件付きのレコード操作 |
 | --- | --- | --- |
 | memory | なし | プロセス内で対応 |
-| bbolt | Path・Timeout | ローカルトランザクション |
+| bbolt | Path・Timeout・InitialMmapSize | ローカルトランザクション |
 | sql | DB・Dialect・AutoMigrate・CloseDB | SQLite/PostgreSQLのSQL方言 |
 | s3 | Bucket・Region・Endpoint・AddressStyle | ETag条件 |
 | dynamodb | Table・Region | 条件付きPutItem/DeleteItem |
@@ -128,6 +128,18 @@ store.Backup(ctx, writer)は、開いたままのbboltファイル全体を一�
 // storeはbboltで開いた接続、destinationは別のio.Writer。
 err = store.Backup(ctx, destination)
 ```
+
+bbolt.Config.InitialMmapSizeは、レコード・Blob共通の初期mmap容量をバイト単位で指定します。既定値は0で、bboltの従来の動作を保ちます。その後の書き込みを収められる容量を明示すれば、バックアップ中の再マッピング待ちを避けられます。指定範囲を超える拡張では再び待つ場合があります。Windowsではbboltが指定した対応づけの大きさまで実ファイルも伸ばすため、大きな値は明示指定した場合だけ使います。同じファイルを共有する全ハンドルはMode・Timeout・InitialMmapSizeを揃えてください。不一致と負の容量はErrInvalidです。
+
+```go
+store, err := bbolt.Open(ctx, bbolt.Config{
+    Path: "spool.db", InitialMmapSize: 256 << 20, // 明示的に256MiBを指定
+})
+// ビルドタグで選ぶ場合も同じ項目を使えます。
+// yuruidb.Config{"Path": "spool.db", "InitialMmapSize": 256 << 20}
+```
+
+遅い相手へ配信するHTTPバックアップでは、まずローカルの一時ファイルへBackupを完了し、先頭へSeekしてからそのファイルを相手に流せます。読み取りトランザクションの長さをネットワーク転送時間から切り離し、ローカルへの書き出し時間に抑えられます。一時ファイルの後片付けはアプリケーションで行ってください。
 
 ## static importとビルドタグ
 

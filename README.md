@@ -70,7 +70,7 @@ A mismatch does not prove failure: another writer may already have superseded it
 | Driver | Main connection settings | Conditional record mutations |
 | --- | --- | --- |
 | `memory` | none | in-process |
-| `bbolt` | `Path`, `Timeout` | local file transactions |
+| `bbolt` | `Path`, `Timeout`, `InitialMmapSize` | local file transactions |
 | `sql` | `DB`, `Dialect`, `AutoMigrate`, `CloseDB` | SQLite/PostgreSQL SQL dialects |
 | `s3` | `Bucket`, `Region`, optional `Endpoint`, `AddressStyle` | ETag conditions |
 | `dynamodb` | `Table`, `Region` | conditional PutItem/DeleteItem |
@@ -128,6 +128,18 @@ An injected SQL DB is borrowed by default. When sharing it between record and Bl
 // store was opened with the bbolt driver; destination is a separate io.Writer.
 err = store.Backup(ctx, destination)
 ```
+
+`bbolt.Config.InitialMmapSize` sets the initial mmap capacity in bytes for both record and Blob connections. It defaults to `0`, preserving bbolt's behavior. An explicit capacity large enough for subsequent writes can avoid remapping waits during a backup; growth beyond the mapping can still wait. On Windows, bbolt immediately extends the database file to the requested mapping size, so a large capacity is opt-in. All handles sharing one file must use the same `Mode`, `Timeout`, and `InitialMmapSize`; mismatches return `ErrInvalid`. Negative capacities are rejected.
+
+```go
+store, err := bbolt.Open(ctx, bbolt.Config{
+    Path: "spool.db", InitialMmapSize: 256 << 20, // explicit 256 MiB mapping
+})
+// For build-tag-selected drivers, the same field is available via:
+// yuruidb.Config{"Path": "spool.db", "InitialMmapSize": 256 << 20}
+```
+
+For an HTTP backup endpoint with slow clients, write the snapshot to a local temporary file, finish `Backup`, seek to the start, and then stream that file to the client. This bounds the database read transaction to local snapshot creation instead of network transfer. The application owns the temporary file's cleanup.
 
 ## Static imports and build tags
 

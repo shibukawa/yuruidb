@@ -22,12 +22,17 @@ type Config struct {
 	Path, Collection string
 	Mode             os.FileMode
 	Timeout          time.Duration
+	// InitialMmapSize reserves the initial mapping in bytes; zero preserves
+	// bbolt's default. All owners sharing a file must use the same value.
+	// On Windows this also immediately extends the physical database file.
+	InitialMmapSize int
 }
 type connection struct {
-	db      *bolt.DB
-	refs    int
-	mode    os.FileMode
-	timeout time.Duration
+	db              *bolt.DB
+	refs            int
+	mode            os.FileMode
+	timeout         time.Duration
+	initialMmapSize int
 }
 
 var connections = struct {
@@ -78,6 +83,9 @@ func openTransport(ctx context.Context, c Config) (*transport, error) {
 	if c.Path == "" {
 		return nil, fmt.Errorf("%w: bbolt path required", yuruidb.ErrInvalid)
 	}
+	if c.InitialMmapSize < 0 {
+		return nil, fmt.Errorf("%w: InitialMmapSize must be nonnegative", yuruidb.ErrInvalid)
+	}
 	path, err := canonicalPath(c.Path)
 	if err != nil {
 		return nil, err
@@ -93,13 +101,13 @@ func openTransport(ctx context.Context, c Config) (*transport, error) {
 	connections.Lock()
 	conn := connections.files[path]
 	if conn != nil {
-		if conn.mode != mode || conn.timeout != timeout {
+		if conn.mode != mode || conn.timeout != timeout || conn.initialMmapSize != c.InitialMmapSize {
 			connections.Unlock()
 			return nil, fmt.Errorf("%w: conflicting bbolt open options", yuruidb.ErrInvalid)
 		}
 		conn.refs++
 	} else {
-		db, err := bolt.Open(path, mode, &bolt.Options{Timeout: timeout})
+		db, err := bolt.Open(path, mode, &bolt.Options{Timeout: timeout, InitialMmapSize: c.InitialMmapSize})
 		if err != nil {
 			connections.Unlock()
 			return nil, err
@@ -111,7 +119,7 @@ func openTransport(ctx context.Context, c Config) (*transport, error) {
 			connections.Unlock()
 			return nil, err
 		}
-		conn = &connection{db: db, refs: 1, mode: mode, timeout: timeout}
+		conn = &connection{db: db, refs: 1, mode: mode, timeout: timeout, initialMmapSize: c.InitialMmapSize}
 		connections.files[path] = conn
 	}
 	connections.Unlock()
